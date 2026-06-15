@@ -8,7 +8,8 @@ let package = Package(
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "LocalWispr", targets: ["LocalWispr"])
+        .executable(name: "LocalWispr", targets: ["LocalWispr"]),
+        .executable(name: "LocalWisprPasteHelper", targets: ["LocalWisprPasteHelper"])
     ],
     targets: [
         .target(
@@ -24,6 +25,14 @@ let package = Package(
         .executableTarget(
             name: "LocalWispr",
             dependencies: ["LocalWisprCore"]
+        ),
+        .executableTarget(
+            name: "LocalWisprPasteHelper",
+            linkerSettings: [
+                .linkedFramework("AppKit"),
+                .linkedFramework("ApplicationServices"),
+                .linkedFramework("CoreGraphics")
+            ]
         ),
         .testTarget(
             name: "LocalWisprCoreTests",

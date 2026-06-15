@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panelController: DictationPanelController?
     private var hotkeyController: HotkeyController?
     private var session: DictationSession?
+    private var autoPasteObserver: NSObjectProtocol?
     private let settingsWindowController = SettingsWindowController()
     private let audioCapture = AudioCapture()
     private let logger = TimingLogger()
@@ -27,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.session = session
 
         setupStatusItem()
+        observeAutoPasteAvailability()
         setupHotkey(for: session, panelController: panelController)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self, weak panelController] in
             guard let self, let panelController else { return }
@@ -47,6 +49,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         hotkeyController?.stop()
+
+        if let autoPasteObserver {
+            NotificationCenter.default.removeObserver(autoPasteObserver)
+        }
+    }
+
+    private func observeAutoPasteAvailability() {
+        autoPasteObserver = NotificationCenter.default.addObserver(
+            forName: .localWisprAutoPasteDidBecomeAvailable,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.handleAutoPasteBecameAvailable()
+            }
+        }
+    }
+
+    private func handleAutoPasteBecameAvailable() {
+        if InsertionController.isAccessibilityTrusted, let session, let panelController {
+            hotkeyController?.stop()
+            setupHotkey(for: session, panelController: panelController)
+        }
+
+        panelController?.show(
+            .init(
+                phase: .idle,
+                title: "Auto-paste ready",
+                subtitle: "Hold Control-Option-Space",
+                showsSpinner: false
+            ),
+            autoHideAfter: 2.0
+        )
     }
 
     private func setupStatusItem() {
@@ -98,7 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .init(
                     phase: .error,
                     title: "Hotkey unavailable",
-                    subtitle: "Grant Accessibility permission from the menu",
+                    subtitle: "Grant Accessibility or check hotkey conflict",
                     showsSpinner: false
                 ),
                 autoHideAfter: 4.0

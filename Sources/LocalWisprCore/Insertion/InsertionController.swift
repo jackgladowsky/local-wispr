@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import CoreGraphics
 import Foundation
 
 struct InsertionTarget: Equatable {
@@ -44,26 +45,10 @@ final class InsertionController {
         let snapshot = PasteboardSnapshot.capture()
         copyToPasteboard(text)
 
-        guard Self.isAccessibilityTrusted else {
-            return .init(
-                outcome: .copied,
-                detail: "Accessibility permission needed to paste",
-                restoredClipboard: false
-            )
-        }
-
         guard isStillFocusedOnTarget(target) else {
             return .init(
                 outcome: .copied,
-                detail: "Focus changed",
-                restoredClipboard: false
-            )
-        }
-
-        if isSecureTargetCurrentFocus() {
-            return .init(
-                outcome: .copied,
-                detail: "Secure field detected",
+                detail: "Focus changed — press ⌘V to paste manually",
                 restoredClipboard: false
             )
         }
@@ -71,7 +56,46 @@ final class InsertionController {
         let pasteboard = NSPasteboard.general
         let temporaryChangeCount = pasteboard.changeCount
 
-        postPasteShortcut()
+        if Self.isAccessibilityTrusted {
+            if isSecureTargetCurrentFocus() {
+                return .init(
+                    outcome: .copied,
+                    detail: "Secure field detected — press ⌘V if intended",
+                    restoredClipboard: false
+                )
+            }
+
+            postPasteShortcut()
+        } else {
+            switch await PasteHelperController.paste() {
+            case .pasted:
+                break
+            case .secureTarget:
+                return .init(
+                    outcome: .copied,
+                    detail: "Secure field detected — press ⌘V if intended",
+                    restoredClipboard: false
+                )
+            case .needsPermission:
+                return .init(
+                    outcome: .copied,
+                    detail: "Copied — enable Accessibility for auto-paste",
+                    restoredClipboard: false
+                )
+            case .notInstalled:
+                return .init(
+                    outcome: .copied,
+                    detail: "Copied — paste helper not installed",
+                    restoredClipboard: false
+                )
+            case .failed:
+                return .init(
+                    outcome: .copied,
+                    detail: "Copied — paste helper unavailable",
+                    restoredClipboard: false
+                )
+            }
+        }
         try? await Task.sleep(for: PasteboardConstants.pasteDelay)
 
         let restored = restorePreviousClipboardIfStillTemporary(
@@ -88,14 +112,16 @@ final class InsertionController {
     }
 
     static var isAccessibilityTrusted: Bool {
-        AXIsProcessTrusted()
+        AXIsProcessTrusted() || CGPreflightPostEventAccess()
     }
 
     static func requestAccessibilityTrustPrompt() {
         let options = [
             "AXTrustedCheckOptionPrompt": true
         ] as CFDictionary
+
         _ = AXIsProcessTrustedWithOptions(options)
+        _ = CGRequestPostEventAccess()
     }
 
     private func copyToPasteboard(_ text: String) {

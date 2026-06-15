@@ -34,7 +34,11 @@ enum PermissionSupport {
         let microphone: StatusKind
 
         var isComplete: Bool {
-            accessibility.isAllowed && microphone.isAllowed
+            microphone.isAllowed
+        }
+
+        var canAutoPasteFromMainApp: Bool {
+            accessibility.isAllowed
         }
     }
 
@@ -84,12 +88,31 @@ enum PermissionSupport {
 
     @MainActor
     static func openAccessibilitySettings() {
-        openSystemSettingsPane("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        openSystemSettingsPane("x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility")
     }
 
     @MainActor
     static func openMicrophoneSettings() {
-        openSystemSettingsPane("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        openSystemSettingsPane("x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Microphone")
+    }
+
+    static var stableInstallWarning: String? {
+        let stablePath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Applications")
+            .appendingPathComponent("Local Wispr.app")
+            .standardizedFileURL
+            .path
+        let currentPath = Bundle.main.bundleURL.standardizedFileURL.path
+
+        if currentPath == stablePath {
+            return nil
+        }
+
+        if currentPath.contains("/dist/") {
+            return "Running from dist/. Install to ~/Applications so macOS permissions stick across rebuilds."
+        }
+
+        return "Running from \(currentPath). For smoother permissions, use ~/Applications/Local Wispr.app."
     }
 
     @MainActor

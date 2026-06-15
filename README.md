@@ -43,9 +43,16 @@ This installs and launches:
 
 ```text
 ~/Applications/Local Wispr.app
+~/Applications/Local Wispr Paste Helper.app
 ```
 
-Authorize this installed copy in System Settings. Avoid authorizing temporary builds from `dist/`, because rebuilds can make macOS treat them as a changed app.
+Authorize the installed copies in System Settings. Avoid authorizing temporary builds from `dist/`, because rebuilds can make macOS treat them as changed apps.
+
+`Local Wispr Paste Helper.app` is intentionally separate and stable. `scripts/install-app.sh` keeps an existing helper in place by default so Accessibility trust can survive main-app rebuilds. To intentionally replace the helper:
+
+```sh
+LOCAL_WISPR_UPDATE_HELPER=1 scripts/install-app.sh
+```
 
 For the smoothest permission behavior across rebuilds, sign with a stable code signing identity:
 
@@ -68,13 +75,11 @@ Reset stale macOS permission records:
 scripts/reset-permissions.sh
 ```
 
-The hotkey and paste flow need Accessibility permission. Use the menu bar item's "Prompt for Accessibility" action, then enable Local Wispr in System Settings.
+Microphone permission is required for real dictation. Accessibility is optional but enables automatic paste. Without Accessibility, Local Wispr still copies the cleaned output so you can press Command-V manually.
 
-After granting permission, choose "Retry Hotkey" from the menu bar item or relaunch the app.
+Use Settings → Microphone to approve audio capture. Use Settings → Main App Accessibility or Settings → Paste Helper to approve auto-paste. The settings window polls macOS after opening System Settings and automatically retries the hotkey when permission flips to allowed.
 
-The real dictation path also needs Microphone permission. Use "Prompt for Microphone" from the menu bar item.
-
-Once Microphone and Accessibility are approved for `~/Applications/Local Wispr.app`, Local Wispr should not ask every time. It will paste into the currently focused cursor using the same path as a normal Command-V paste.
+Once Microphone is approved and either the main app or paste helper has Accessibility, Local Wispr should not ask every time. It will paste into the currently focused cursor using the same path as a normal Command-V paste.
 
 ## Local Engine Setup
 

@@ -11,6 +11,10 @@ struct SettingsView: View {
 
             permissions
 
+            if let warning = model.installWarning {
+                installWarning(warning)
+            }
+
             Divider()
 
             engines
@@ -39,7 +43,7 @@ struct SettingsView: View {
                 Text(model.permissionSnapshot.isComplete ? "Local Wispr Ready" : "Finish Setup")
                     .font(.system(size: 20, weight: .semibold))
 
-                Text(model.permissionSnapshot.isComplete ? "Permissions are set." : "Approve the two macOS permissions.")
+                Text(headerSubtitle)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
@@ -57,37 +61,62 @@ struct SettingsView: View {
     private var permissions: some View {
         VStack(spacing: 10) {
             permissionRow(
+                icon: "mic",
+                title: "Microphone",
+                subtitle: "Required for local dictation",
+                statusTitle: model.permissionSnapshot.microphone.title,
+                isAllowed: model.permissionSnapshot.microphone.isAllowed,
+                buttonTitle: model.permissionSnapshot.microphone.isAllowed ? "Open" : "Enable",
+                action: model.requestMicrophone
+            )
+
+            permissionRow(
                 icon: "hand.raised",
-                title: "Accessibility",
-                subtitle: "Global hotkey and paste",
-                status: model.permissionSnapshot.accessibility,
+                title: "Main App Accessibility",
+                subtitle: "Auto-paste from this build",
+                statusTitle: model.permissionSnapshot.accessibility.title,
+                isAllowed: model.permissionSnapshot.accessibility.isAllowed,
                 buttonTitle: model.permissionSnapshot.accessibility.isAllowed ? "Open" : "Enable",
                 action: model.openAccessibility
             )
 
             permissionRow(
-                icon: "mic",
-                title: "Microphone",
-                subtitle: "Local audio capture",
-                status: model.permissionSnapshot.microphone,
-                buttonTitle: model.permissionSnapshot.microphone.isAllowed ? "Open" : "Enable",
-                action: model.requestMicrophone
+                icon: "bolt.horizontal",
+                title: "Paste Helper",
+                subtitle: "Stable auto-paste across rebuilds",
+                statusTitle: model.pasteHelperStatus.title,
+                isAllowed: model.pasteHelperStatus.isTrusted,
+                buttonTitle: model.pasteHelperButtonTitle,
+                action: model.openPasteHelperAccessibility
             )
         }
+    }
+
+    private var headerSubtitle: String {
+        if !model.permissionSnapshot.microphone.isAllowed {
+            return "Approve microphone to start dictating."
+        }
+
+        if model.canAutoPaste {
+            return "Dictation and auto-paste are ready."
+        }
+
+        return "Dictation works now; without Accessibility it will copy for manual ⌘V."
     }
 
     private func permissionRow(
         icon: String,
         title: String,
         subtitle: String,
-        status: PermissionSupport.StatusKind,
+        statusTitle: String,
+        isAllowed: Bool,
         buttonTitle: String,
         action: @escaping () -> Void
     ) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
                 .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(status.isAllowed ? .green : .blue)
+                .foregroundStyle(isAllowed ? .green : .blue)
                 .frame(width: 24)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -100,15 +129,28 @@ struct SettingsView: View {
 
             Spacer()
 
-            Text(status.title)
+            Text(statusTitle)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(status.isAllowed ? .green : .secondary)
-                .frame(width: 102, alignment: .trailing)
+                .foregroundStyle(isAllowed ? .green : .secondary)
+                .frame(width: 118, alignment: .trailing)
 
             Button(buttonTitle, action: action)
                 .frame(width: 72)
+                .disabled(buttonTitle == "Wait")
         }
         .padding(.vertical, 6)
+    }
+
+    private func installWarning(_ warning: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text(warning)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var engines: some View {
