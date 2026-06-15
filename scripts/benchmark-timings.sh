@@ -134,7 +134,13 @@ if csv_mode:
 
 print("Local Wispr pipeline benchmark")
 print(f"Log: {log_path}")
+detailed_rows = [
+    row for row in rows
+    if as_float(row.get("audio_stop_ms")) is not None or as_float(row.get("insert_ms")) is not None
+]
+
 print(f"Successful sessions analyzed: {len(rows)}")
+print(f"Detailed stage sessions: {len(detailed_rows)}")
 print(f"Error sessions in log: {len(errors)}")
 if last:
     print(f"Window: last {last} successful sessions")
@@ -144,6 +150,10 @@ if not rows:
     print("No successful timing rows found yet. Run a dictation or Simulate Dictation, then retry.")
     sys.exit(0)
 
+if detailed_rows and len(detailed_rows) < len(rows):
+    print("Note: this log mixes legacy rows and detailed stage rows; stage breakdown uses detailed rows only.")
+
+print()
 print(f"{'metric':<26} {'n':>4} {'avg':>9} {'median':>9} {'p90':>9} {'p95':>9} {'min':>9} {'max':>9}")
 print("-" * 86)
 for metric in metrics:
@@ -162,19 +172,23 @@ for metric in metrics:
     )
 
 stage_metrics = ["audio_stop_ms", "stt_ms", "rewrite_ms", "insert_ms"]
+stage_rows = detailed_rows if detailed_rows else rows
 stage_avgs = {}
 for metric in stage_metrics:
-    values = [as_float(row.get(metric)) for row in rows]
+    values = [as_float(row.get(metric)) for row in stage_rows]
     values = [value for value in values if value is not None]
     if values:
         stage_avgs[metric] = statistics.mean(values)
 
-release_values = [as_float(row.get("release_to_output_ms")) for row in rows]
+release_values = [as_float(row.get("release_to_output_ms")) for row in stage_rows]
 release_values = [value for value in release_values if value is not None]
 if release_values and stage_avgs:
     release_avg = statistics.mean(release_values)
     print()
-    print("Average post-release bottleneck share:")
+    label = "Average post-release bottleneck share"
+    if detailed_rows:
+        label += f" (detailed rows n={len(detailed_rows)})"
+    print(label + ":")
     for metric, value in sorted(stage_avgs.items(), key=lambda item: item[1], reverse=True):
         share = value / release_avg * 100 if release_avg else 0
         print(f"- {metric:<16} {value:>7.1f} ms  {share:>5.1f}% of release_to_output")

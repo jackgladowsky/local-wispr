@@ -74,6 +74,7 @@ final class TimingLogger {
     ) -> [String] {
         [
             "session=\(trace.id.uuidString)",
+            "schema=pipeline-v2",
             "result=\(result)",
             quotedField("detail", detail),
             "total_session_ms=\(format(trace.elapsedMilliseconds(from: "hotkey_down", to: "output_final")))",
