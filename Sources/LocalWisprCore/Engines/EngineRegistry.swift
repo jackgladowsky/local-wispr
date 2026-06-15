@@ -77,6 +77,12 @@ struct FallbackRewriteEngine: RewriteEngine {
         }
 
         do {
+            if primary is LlamaCLIRewriteEngine {
+                // The CLI path launches a subprocess that is not safely cancellable mid-run.
+                // Prefer llama-server for latency-budgeted llama.cpp cleanup.
+                return try await primary.rewrite(transcript)
+            }
+
             return try await rewriteWithBudget(transcript)
         } catch {
             return try await fallback.rewrite(transcript)

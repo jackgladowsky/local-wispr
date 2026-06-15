@@ -68,7 +68,7 @@ enum PasteHelperController {
     }
 
     static func startResidentIfInstalled() async {
-        guard let appURL else { return }
+        guard let appURL, supportsResidentPaste else { return }
         await openHelper(appURL: appURL, arguments: [], wait: false)
     }
 
@@ -103,13 +103,37 @@ enum PasteHelperController {
         guard
             let data = try? Data(contentsOf: infoURL),
             let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
-            let version = plist["CFBundleVersion"] as? String,
-            let integerVersion = Int(version)
+            let version = plist["CFBundleVersion"] as? String
         else {
             return false
         }
 
-        return integerVersion >= 2
+        return bundleVersion(version, isAtLeast: "2")
+    }
+
+    private static func bundleVersion(_ version: String, isAtLeast requiredVersion: String) -> Bool {
+        let current = versionComponents(version)
+        let required = versionComponents(requiredVersion)
+        let count = max(current.count, required.count)
+
+        for index in 0..<count {
+            let lhs = index < current.count ? current[index] : 0
+            let rhs = index < required.count ? required[index] : 0
+
+            if lhs > rhs { return true }
+            if lhs < rhs { return false }
+        }
+
+        return true
+    }
+
+    private static func versionComponents(_ version: String) -> [Int] {
+        version
+            .split(separator: ".")
+            .map { component in
+                let digits = component.prefix { $0.isNumber }
+                return Int(digits) ?? 0
+            }
     }
 
     private static var candidateAppURLs: [URL] {

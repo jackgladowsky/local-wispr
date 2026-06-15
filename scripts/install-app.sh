@@ -44,14 +44,42 @@ install_bundle_contents() {
     fi
 }
 
+version_ge() {
+    local lhs="$1"
+    local rhs="$2"
+    local lhs_part rhs_part
+    local IFS=.
+    read -ra lhs_parts <<<"$lhs"
+    read -ra rhs_parts <<<"$rhs"
+
+    for index in 0 1 2; do
+        lhs_part="${lhs_parts[$index]:-0}"
+        rhs_part="${rhs_parts[$index]:-0}"
+        lhs_part="${lhs_part%%[^0-9]*}"
+        rhs_part="${rhs_part%%[^0-9]*}"
+        lhs_part="${lhs_part:-0}"
+        rhs_part="${rhs_part:-0}"
+
+        if ((10#$lhs_part > 10#$rhs_part)); then
+            return 0
+        fi
+
+        if ((10#$lhs_part < 10#$rhs_part)); then
+            return 1
+        fi
+    done
+
+    return 0
+}
+
 install_bundle_contents "$BUILT_APP" "$INSTALLED_APP"
 
 BUILT_HELPER_VERSION="$(bundle_version "$BUILT_HELPER")"
 INSTALLED_HELPER_VERSION="$(bundle_version "$INSTALLED_HELPER")"
 
 if [[ -d "$INSTALLED_HELPER" \
-    && "${LOCAL_WISPR_UPDATE_HELPER:-0}" != "1" \
-    && "$INSTALLED_HELPER_VERSION" -ge "$BUILT_HELPER_VERSION" ]]; then
+    && "${LOCAL_WISPR_UPDATE_HELPER:-0}" != "1" ]] \
+    && version_ge "$INSTALLED_HELPER_VERSION" "$BUILT_HELPER_VERSION"; then
     echo "Keeping existing paste helper for stable Accessibility trust: $INSTALLED_HELPER" >&2
 else
     if [[ -d "$INSTALLED_HELPER" && "${LOCAL_WISPR_UPDATE_HELPER:-0}" != "1" ]]; then
