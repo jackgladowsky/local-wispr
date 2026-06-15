@@ -4,7 +4,7 @@ import Foundation
 final class DictationSession {
     private enum State {
         case idle
-        case preparing
+        case preparing(TimingTrace)
         case recording(SessionContext)
         case processing
     }
@@ -48,7 +48,10 @@ final class DictationSession {
     func startRecording() {
         guard case .idle = state else { return }
 
-        state = .preparing
+        let trace = TimingTrace()
+        trace.mark("hotkey_down")
+
+        state = .preparing(trace)
         panelController.show(
             .init(
                 phase: .listening,
@@ -59,7 +62,7 @@ final class DictationSession {
         )
 
         Task { [weak self] in
-            await self?.beginRecording()
+            await self?.beginRecording(trace: trace)
         }
     }
 
@@ -67,8 +70,11 @@ final class DictationSession {
         guard case .idle = state else { return }
 
         let trace = TimingTrace()
+        trace.mark("hotkey_down")
         trace.mark("record_start")
         trace.mark("record_stop")
+        trace.mark("audio_stop_begin")
+        trace.mark("audio_stop_end")
 
         let context = SessionContext(
             startedAt: Date(),
@@ -99,7 +105,9 @@ final class DictationSession {
 
         let recording: AudioRecording
         do {
+            context.trace.mark("audio_stop_begin")
             recording = try audioCapture.stop()
+            context.trace.mark("audio_stop_end")
         } catch {
             state = .idle
             panelController.show(
@@ -137,8 +145,11 @@ final class DictationSession {
         )
     }
 
-    private func beginRecording() async {
+    private func beginRecording(trace: TimingTrace) async {
+        trace.mark("mic_permission_start")
         let granted = await AudioCapture.requestMicrophoneAccessIfNeeded()
+        trace.mark("mic_permission_end")
+
         guard granted else {
             state = .idle
             panelController.show(
@@ -153,17 +164,21 @@ final class DictationSession {
             return
         }
 
-        guard case .preparing = state else { return }
-
-        let trace = TimingTrace()
-        trace.mark("record_start")
+        guard case .preparing(let currentTrace) = state, currentTrace.id == trace.id else { return }
 
         do {
+            trace.mark("audio_start_begin")
             try audioCapture.start()
+            trace.mark("audio_start_end")
+            trace.mark("record_start")
+
+            trace.mark("target_capture_start")
+            let target = insertionController.captureTarget()
+            trace.mark("target_capture_end")
 
             let context = SessionContext(
                 startedAt: Date(),
-                target: insertionController.captureTarget(),
+                target: target,
                 trace: trace
             )
 
@@ -194,18 +209,27 @@ final class DictationSession {
     private enum ProcessingMode {
         case real
         case mock
+
+        var logValue: String {
+            switch self {
+            case .real:
+                "real"
+            case .mock:
+                "mock"
+            }
+        }
     }
 
     private func process(context: SessionContext, recording: AudioRecording?, mode: ProcessingMode) async {
-        do {
-            let sttEngine = mode == .mock ? mockSTTEngine : sttEngine
-            let rewriteEngine = mode == .mock ? mockRewriteEngine : rewriteEngine
+        let activeSTTEngine: STTEngine = mode == .mock ? mockSTTEngine : sttEngine
+        let activeRewriteEngine: RewriteEngine = mode == .mock ? mockRewriteEngine : rewriteEngine
 
+        do {
             panelController.show(
                 .init(
                     phase: .transcribing,
                     title: "Transcribing",
-                    subtitle: sttEngine.name,
+                    subtitle: activeSTTEngine.name,
                     showsSpinner: true
                 )
             )
@@ -218,7 +242,8 @@ final class DictationSession {
                 duration: recording?.duration ?? max(0.1, Date().timeIntervalSince(context.startedAt))
             )
 
-            let transcript = try await sttEngine.transcribe(request)
+            context.trace.mark("stt_start")
+            let transcript = try await activeSTTEngine.transcribe(request)
             try Task.checkCancellation()
             context.trace.mark("stt_final")
 
@@ -226,15 +251,17 @@ final class DictationSession {
                 .init(
                     phase: .polishing,
                     title: "Polishing",
-                    subtitle: rewriteEngine.name,
+                    subtitle: activeRewriteEngine.name,
                     showsSpinner: true
                 )
             )
 
-            let cleaned = try await rewriteEngine.rewrite(transcript)
+            context.trace.mark("rewrite_start")
+            let cleaned = try await activeRewriteEngine.rewrite(transcript)
             try Task.checkCancellation()
             context.trace.mark("rewrite_final")
 
+            context.trace.mark("insert_start")
             let insertionResult = await insertionController.insert(cleaned.text, target: context.target)
             context.trace.mark("output_final")
 
@@ -246,7 +273,16 @@ final class DictationSession {
             )
 
             panelController.show(snapshot, autoHideAfter: 1.4)
-            logger.write(context.trace, insertionResult: insertionResult)
+            logger.write(
+                context.trace,
+                insertionResult: insertionResult,
+                mode: mode.logValue,
+                recording: recording,
+                sttEngineName: activeSTTEngine.name,
+                rewriteEngineName: activeRewriteEngine.name,
+                transcript: transcript,
+                cleaned: cleaned
+            )
             state = .idle
         } catch is CancellationError {
             state = .idle
@@ -261,7 +297,13 @@ final class DictationSession {
                 ),
                 autoHideAfter: 3.0
             )
-            logger.write(context.trace, error: error)
+            logger.write(
+                context.trace,
+                error: error,
+                mode: mode.logValue,
+                sttEngineName: activeSTTEngine.name,
+                rewriteEngineName: activeRewriteEngine.name
+            )
             state = .idle
         }
     }

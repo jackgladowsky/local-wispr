@@ -136,6 +136,34 @@ Inspect signing state:
 scripts/signing-status.sh
 ```
 
+## Benchmarking
+
+Local Wispr writes one timing line per dictation session to:
+
+```text
+~/Library/Logs/LocalWispr/mock-flow.log
+```
+
+Summarize the full pipeline:
+
+```sh
+scripts/benchmark-timings.sh
+```
+
+Limit the summary to the most recent successful sessions:
+
+```sh
+scripts/benchmark-timings.sh --last 20
+```
+
+Export raw timing rows as CSV:
+
+```sh
+scripts/benchmark-timings.sh --csv > timings.csv
+```
+
+New timing logs include stage-level fields such as `hotkey_to_recording_ms`, `audio_start_ms`, `audio_stop_ms`, `stt_ms`, `rewrite_ms`, `insert_ms`, and `release_to_output_ms`. The most important user-facing metric is `release_to_output_ms`: time from releasing the hotkey to pasted/copied output.
+
 ## Architecture
 
 ```text
@@ -215,6 +243,7 @@ ollama pull qwen3:0.6b
 | `scripts/setup-local-engines.sh` | Install local STT and optional cleanup dependencies |
 | `scripts/check-local-engines.sh` | Print local engine availability |
 | `scripts/smoke-local-engines.sh` | Run a small local engine smoke test |
+| `scripts/benchmark-timings.sh` | Summarize full-pipeline timing logs |
 | `scripts/reset-permissions.sh` | Reset macOS TCC records for Local Wispr and the paste helper |
 | `scripts/signing-status.sh` | Show signing identities and current app signatures |
 
