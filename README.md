@@ -137,7 +137,15 @@ scripts/install-app.sh
 
 Avoid authorizing app bundles directly from `dist/`. Rebuilds can make macOS treat those bundles as changed apps, which often breaks Accessibility trust.
 
-By default, `install-app.sh` preserves an existing paste helper to keep its Accessibility permission stable. When the helper bundle version increases, the script updates it and warns that Accessibility may need approval again. To intentionally replace the helper:
+By default, `install-app.sh` preserves an existing paste helper to keep its Accessibility permission stable. When the helper bundle version increases, the script updates it and resets Accessibility/PostEvent/ListenEvent TCC records to avoid the stale checked-but-untrusted macOS state. You will need to approve **Local Wispr Paste Helper** again after that kind of helper update.
+
+For development, you can force a clean Accessibility reset on every install:
+
+```sh
+LOCAL_WISPR_RESET_ACCESSIBILITY_ON_INSTALL=1 scripts/install-app.sh
+```
+
+To intentionally replace the helper even when the installed version is current:
 
 ```sh
 LOCAL_WISPR_UPDATE_HELPER=1 scripts/install-app.sh
@@ -264,7 +272,7 @@ ollama pull qwen3:0.6b
 | `scripts/check-local-engines.sh` | Print local engine availability |
 | `scripts/smoke-local-engines.sh` | Run a small local engine smoke test |
 | `scripts/benchmark-timings.sh` | Summarize full-pipeline timing logs |
-| `scripts/reset-permissions.sh` | Reset macOS TCC records for Local Wispr and the paste helper |
+| `scripts/reset-permissions.sh` | Reset macOS TCC records for Local Wispr and the paste helper, including Accessibility/PostEvent/ListenEvent |
 | `scripts/signing-status.sh` | Show signing identities and current app signatures |
 
 ## Status

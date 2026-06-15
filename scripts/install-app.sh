@@ -7,6 +7,9 @@ BUILT_HELPER="$ROOT_DIR/dist/Local Wispr Paste Helper.app"
 INSTALL_DIR="$HOME/Applications"
 INSTALLED_APP="$INSTALL_DIR/Local Wispr.app"
 INSTALLED_HELPER="$INSTALL_DIR/Local Wispr Paste Helper.app"
+BUNDLE_ID="dev.local-wispr.LocalWispr"
+HELPER_BUNDLE_ID="dev.local-wispr.PasteHelper"
+RESET_ACCESSIBILITY=0
 
 cd "$ROOT_DIR"
 
@@ -72,6 +75,18 @@ version_ge() {
     return 0
 }
 
+reset_accessibility_tcc() {
+    osascript -e 'quit app "System Settings"' >/dev/null 2>&1 || true
+
+    for service in Accessibility PostEvent ListenEvent; do
+        tccutil reset "$service" "$BUNDLE_ID" >/dev/null 2>&1 || true
+        tccutil reset "$service" "$HELPER_BUNDLE_ID" >/dev/null 2>&1 || true
+    done
+
+    killall tccd >/dev/null 2>&1 || true
+    echo "Reset Accessibility/PostEvent/ListenEvent records for Local Wispr and Paste Helper." >&2
+}
+
 install_bundle_contents "$BUILT_APP" "$INSTALLED_APP"
 
 BUILT_HELPER_VERSION="$(bundle_version "$BUILT_HELPER")"
@@ -84,14 +99,33 @@ if [[ -d "$INSTALLED_HELPER" \
 else
     if [[ -d "$INSTALLED_HELPER" && "${LOCAL_WISPR_UPDATE_HELPER:-0}" != "1" ]]; then
         echo "Updating paste helper from version $INSTALLED_HELPER_VERSION to $BUILT_HELPER_VERSION." >&2
-        echo "You may need to re-approve Local Wispr Paste Helper in Accessibility." >&2
+        echo "Accessibility trust will be reset to avoid stale checked-but-untrusted TCC state." >&2
     fi
+
     install_bundle_contents "$BUILT_HELPER" "$INSTALLED_HELPER"
+
+    if [[ "${LOCAL_WISPR_RESET_TCC_ON_HELPER_UPDATE:-1}" == "1" ]]; then
+        RESET_ACCESSIBILITY=1
+    fi
+fi
+
+if [[ "${LOCAL_WISPR_RESET_ACCESSIBILITY_ON_INSTALL:-0}" == "1" \
+    || "${LOCAL_WISPR_RESET_TCC_ON_INSTALL:-0}" == "1" ]]; then
+    RESET_ACCESSIBILITY=1
 fi
 
 codesign --verify --deep --strict "$INSTALLED_HELPER"
 codesign --verify --deep --strict "$INSTALLED_APP"
+
+if [[ "$RESET_ACCESSIBILITY" == "1" ]]; then
+    reset_accessibility_tcc
+fi
+
 open -n "$INSTALLED_APP"
+
+if [[ "$RESET_ACCESSIBILITY" == "1" && "${LOCAL_WISPR_OPEN_ACCESSIBILITY_ON_RESET:-1}" == "1" ]]; then
+    open 'x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility'
+fi
 
 echo "$INSTALLED_APP"
 echo "$INSTALLED_HELPER"
