@@ -1,92 +1,78 @@
 # Local Wispr
 
-Native macOS MVP for a fully local dictation utility.
+Local Wispr is a native macOS menu bar app for fast, fully local dictation. Hold a global hotkey, speak naturally, release, and Local Wispr transcribes, lightly rewrites, and inserts polished text into the active app.
 
-## Current Slice
+The project is currently an early macOS prototype focused on proving the end-to-end local dictation loop: reliable capture, local speech-to-text, local cleanup, safe paste insertion, and smooth macOS permission handling.
 
-The current slice has the full native flow and engine adapters:
+## Highlights
 
-- Menu bar app
-- Top-center floating panel
-- Control-Option-Space hold hotkey
-- Real microphone capture to local audio
-- Normalized WAV conversion for STT
-- whisper.cpp CLI adapter
-- Ollama cleanup adapter
-- Basic local cleanup fallback
-- Mock flow for testing
-- Clipboard-preserving paste path
-- Local timing log
+- **Local-first pipeline**: microphone audio, transcription, cleanup, and timing logs stay on the machine.
+- **Native macOS UX**: menu bar app, no Dock icon, floating status panel, SwiftUI settings.
+- **Hold-to-dictate hotkey**: press and hold `Control` + `Option` + `Space`; release to process.
+- **Local speech-to-text**: `whisper.cpp` CLI adapter with a default local Whisper model.
+- **Local cleanup**: optional Ollama rewrite model with a basic local cleanup fallback.
+- **Safe insertion**: clipboard-preserving paste with focus checks and secure-field avoidance.
+- **Permission-resilient paste helper**: a stable helper app can own Accessibility permission across main-app rebuilds.
 
-## Build
+## Requirements
 
-```sh
-swift build
-```
+- macOS 14 or newer
+- Swift 6 / Xcode Command Line Tools
+- Homebrew, for the local engine setup script
+- Microphone permission for real dictation
+- Accessibility permission for automatic paste; without it, Local Wispr copies output for manual `Command-V`
 
-## Build App Bundle
+## Quick Start
 
 ```sh
-scripts/build-app.sh
-open "dist/Local Wispr.app"
-```
+git clone https://github.com/jackgladowsky/local-wispr.git
+cd local-wispr
 
-## Stable Install
-
-For one-time macOS permission approval, install the app to a stable location:
-
-```sh
+scripts/setup-local-engines.sh
 scripts/install-app.sh
 ```
 
-This installs and launches:
+`install-app.sh` builds, installs, and launches:
 
 ```text
 ~/Applications/Local Wispr.app
 ~/Applications/Local Wispr Paste Helper.app
 ```
 
-Authorize the installed copies in System Settings. Avoid authorizing temporary builds from `dist/`, because rebuilds can make macOS treat them as changed apps.
+Open Local Wispr from the menu bar, finish permissions in **Settings**, then hold `Control` + `Option` + `Space` to dictate.
 
-`Local Wispr Paste Helper.app` is intentionally separate and stable. `scripts/install-app.sh` keeps an existing helper in place by default so Accessibility trust can survive main-app rebuilds. To intentionally replace the helper:
+## Permissions
 
-```sh
-LOCAL_WISPR_UPDATE_HELPER=1 scripts/install-app.sh
-```
+macOS permissions are part of the product flow, not an afterthought. Local Wispr separates required and optional permissions so the app remains usable even when automatic paste is not approved yet.
 
-For the smoothest permission behavior across rebuilds, sign with a stable code signing identity:
+| Permission | Required | Purpose | Fallback |
+| --- | --- | --- | --- |
+| Microphone | Yes | Captures dictation audio locally | Real dictation is unavailable |
+| Main App Accessibility | Optional | Allows the main app to post paste keystrokes | Output is copied to clipboard |
+| Paste Helper Accessibility | Optional | Stable automatic paste across rebuilds | Output is copied to clipboard |
 
-```sh
-LOCAL_WISPR_CODESIGN_IDENTITY="Apple Development: Your Name (...)" scripts/build-app.sh
-scripts/install-app.sh
-```
+The recommended development path is to approve **Local Wispr Paste Helper** for Accessibility. The helper is intentionally kept separate from the main app so macOS trust records are less likely to break every time the main app is rebuilt.
 
-If no signing identity exists, the build script uses an ad-hoc signature. That works for local testing, but macOS may keep the Accessibility checkbox visually enabled while the rebuilt binary no longer matches the old trust record.
-
-Inspect signing state:
-
-```sh
-scripts/signing-status.sh
-```
-
-Reset stale macOS permission records:
+If permissions get stale or macOS shows a checkbox as enabled while the app is still not trusted, reset TCC records:
 
 ```sh
 scripts/reset-permissions.sh
 ```
 
-Microphone permission is required for real dictation. Accessibility is optional but enables automatic paste. Without Accessibility, Local Wispr still copies the cleaned output so you can press Command-V manually.
-
-Use Settings → Microphone to approve audio capture. Use Settings → Main App Accessibility or Settings → Paste Helper to approve auto-paste. The settings window polls macOS after opening System Settings and automatically retries the hotkey when permission flips to allowed.
-
-Once Microphone is approved and either the main app or paste helper has Accessibility, Local Wispr should not ask every time. It will paste into the currently focused cursor using the same path as a normal Command-V paste.
-
 ## Local Engine Setup
 
-Install whisper.cpp, download the default local Whisper model, install Ollama, and pull the default cleanup model:
+Install `whisper.cpp`, download the default Whisper model, install Ollama, and pull the default cleanup model:
 
 ```sh
 scripts/setup-local-engines.sh
+```
+
+The default engine locations are:
+
+```text
+whisper-cli:          /opt/homebrew/bin/whisper-cli or PATH
+Whisper model:        ~/Library/Application Support/LocalWispr/Models/whisper/ggml-base.en.bin
+Ollama cleanup model: qwen3:0.6b
 ```
 
 Check engine status:
@@ -101,26 +87,137 @@ Smoke-test local engine responses:
 scripts/smoke-local-engines.sh
 ```
 
-The app discovers:
-
-```text
-whisper-cli: /opt/homebrew/bin/whisper-cli or PATH
-Whisper model: ~/Library/Application Support/LocalWispr/Models/whisper/ggml-base.en.bin
-Ollama cleanup model: qwen3:0.6b
-```
-
-You can skip Ollama and use the basic local cleanup fallback:
+Ollama is optional. To install only the speech-to-text path and use the built-in cleanup fallback:
 
 ```sh
 LOCAL_WISPR_WITH_OLLAMA=0 scripts/setup-local-engines.sh
 ```
 
-After setup, choose "Reload Engines" from the Local Wispr menu or relaunch the app.
+After changing engines, choose **Reload Engines** from the Local Wispr menu or relaunch the app.
 
-## Debug Log
+## Build and Install
 
-Mock-flow timing is written to:
+Build the Swift package:
+
+```sh
+swift build
+```
+
+Build app bundles into `dist/`:
+
+```sh
+scripts/build-app.sh
+```
+
+Install to a stable user Applications directory:
+
+```sh
+scripts/install-app.sh
+```
+
+Avoid authorizing app bundles directly from `dist/`. Rebuilds can make macOS treat those bundles as changed apps, which often breaks Accessibility trust.
+
+By default, `install-app.sh` preserves an existing paste helper to keep its Accessibility permission stable. To intentionally replace the helper:
+
+```sh
+LOCAL_WISPR_UPDATE_HELPER=1 scripts/install-app.sh
+```
+
+For smoother permission behavior, sign with a stable code signing identity:
+
+```sh
+LOCAL_WISPR_CODESIGN_IDENTITY="Apple Development: Your Name (...)" scripts/build-app.sh
+scripts/install-app.sh
+```
+
+Inspect signing state:
+
+```sh
+scripts/signing-status.sh
+```
+
+## Architecture
 
 ```text
-~/Library/Logs/LocalWispr/mock-flow.log
+LocalWispr.app
+├─ AppDelegate / menu bar lifecycle
+├─ HotkeyController          Carbon global hold hotkey
+├─ AudioCapture              AVFoundation microphone capture
+├─ DictationSession          recording → STT → cleanup → insertion orchestration
+├─ EngineRegistry            STT and rewrite engine selection
+├─ InsertionController       clipboard-safe paste and fallback copy behavior
+├─ Settings                  permissions, engine status, logs, model paths
+└─ TimingLogger              local latency/debug traces
+
+Local Wispr Paste Helper.app
+└─ Owns stable Accessibility trust for synthetic paste events across rebuilds
 ```
+
+## Privacy
+
+Local Wispr is designed to run without cloud transcription or analytics.
+
+- Audio is captured locally and sent to local engines only.
+- The default Whisper model is stored under Application Support.
+- Timing/debug logs are written locally to `~/Library/Logs/LocalWispr/mock-flow.log`.
+- Ollama, when enabled, runs against the local Ollama server at `127.0.0.1:11434`.
+- Setup scripts download open local model artifacts and Homebrew packages as needed.
+
+## Troubleshooting
+
+### Automatic paste does not work
+
+1. Open Local Wispr **Settings**.
+2. Enable **Paste Helper** Accessibility.
+3. Approve **Local Wispr Paste Helper** in System Settings.
+4. Click **Refresh** or wait for the settings window to detect the permission.
+
+If it still fails, run:
+
+```sh
+scripts/reset-permissions.sh
+scripts/install-app.sh
+```
+
+### Hotkey is unavailable
+
+The hotkey may need Accessibility permission or may conflict with another app. Approve Accessibility, then choose **Retry Hotkey** from the menu bar item.
+
+### Transcription engine is missing
+
+Run:
+
+```sh
+scripts/check-local-engines.sh
+```
+
+If `whisper-cli` or the model is missing, run:
+
+```sh
+scripts/setup-local-engines.sh
+```
+
+### Ollama cleanup is unavailable
+
+Local Wispr can still run with the basic cleanup fallback. If you want Ollama cleanup, make sure the service is running and the model is pulled:
+
+```sh
+brew services start ollama
+ollama pull qwen3:0.6b
+```
+
+## Scripts
+
+| Script | Purpose |
+| --- | --- |
+| `scripts/build-app.sh` | Build release app bundles into `dist/` |
+| `scripts/install-app.sh` | Install stable app bundles into `~/Applications` and launch Local Wispr |
+| `scripts/setup-local-engines.sh` | Install local STT and optional cleanup dependencies |
+| `scripts/check-local-engines.sh` | Print local engine availability |
+| `scripts/smoke-local-engines.sh` | Run a small local engine smoke test |
+| `scripts/reset-permissions.sh` | Reset macOS TCC records for Local Wispr and the paste helper |
+| `scripts/signing-status.sh` | Show signing identities and current app signatures |
+
+## Status
+
+This is an experimental MVP. The current focus is making the core macOS dictation loop feel reliable before adding richer dictation modes, model management, packaging, or release automation.
