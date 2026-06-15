@@ -25,7 +25,7 @@ struct InsertionResult: Equatable {
 @MainActor
 final class InsertionController {
     private enum PasteboardConstants {
-        static let pasteDelay: Duration = .milliseconds(180)
+        static let pasteDelay: Duration = .milliseconds(100)
     }
 
     func captureTarget() -> InsertionTarget? {

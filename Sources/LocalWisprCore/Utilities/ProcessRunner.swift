@@ -35,15 +35,18 @@ enum ProcessRunner {
         process.standardOutput = stdout
         process.standardError = stderr
 
+        let semaphore = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in
+            semaphore.signal()
+        }
+
         try process.run()
 
-        let deadline = Date().addingTimeInterval(timeout)
-        while process.isRunning {
-            if Date() > deadline {
-                process.terminate()
-                throw LocalWisprError.processTimedOut(command: executableURL.lastPathComponent)
-            }
-            Thread.sleep(forTimeInterval: 0.05)
+        let waitResult = semaphore.wait(timeout: .now() + timeout)
+        if waitResult == .timedOut {
+            process.terminate()
+            _ = semaphore.wait(timeout: .now() + 1)
+            throw LocalWisprError.processTimedOut(command: executableURL.lastPathComponent)
         }
 
         let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()

@@ -30,6 +30,7 @@ final class TimingLogger {
             quotedField("mode", mode),
             quotedField("stt_engine", sttEngineName),
             quotedField("rewrite_engine", rewriteEngineName),
+            quotedField("cleanup_engine_used", cleaned.engineName ?? rewriteEngineName),
             "recording_duration_s=\(formatSeconds(recording?.duration))",
             "transcript_chars=\(transcript.text.count)",
             "output_chars=\(cleaned.text.count)",

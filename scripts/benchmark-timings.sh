@@ -126,7 +126,10 @@ def fmt(value):
     return "n/a" if value is None else f"{value:.1f}"
 
 if csv_mode:
-    writer = csv.DictWriter(sys.stdout, fieldnames=["timestamp", "session", "result", "mode"] + metrics)
+    writer = csv.DictWriter(
+        sys.stdout,
+        fieldnames=["timestamp", "session", "result", "mode", "stt_engine", "rewrite_engine", "cleanup_engine_used"] + metrics
+    )
     writer.writeheader()
     for row in rows:
         writer.writerow({key: row.get(key, "") for key in writer.fieldnames})

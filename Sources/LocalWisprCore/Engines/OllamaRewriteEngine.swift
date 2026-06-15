@@ -29,7 +29,8 @@ struct OllamaRewriteEngine: RewriteEngine {
                 prompt: Self.prompt(for: transcript.text),
                 stream: false,
                 think: false,
-                options: .init(temperature: 0.1, num_predict: 512)
+                keep_alive: "10m",
+                options: .init(temperature: 0.1, num_predict: Self.numPredict(for: transcript.text))
             )
         )
 
@@ -47,32 +48,20 @@ struct OllamaRewriteEngine: RewriteEngine {
             throw LocalWisprError.cleanupFailed("Ollama returned empty text")
         }
 
-        return CleanedText(text: cleaned)
+        return CleanedText(text: cleaned, engineName: name)
     }
 
     private static func prompt(for transcript: String) -> String {
-        """
-        You are a local dictation cleanup engine.
+        CleanupPrompt.compact(for: transcript)
+    }
 
-        Rewrite the transcript into clean, natural text.
+    private static func numPredict(for transcript: String) -> Int {
+        let environment = ProcessInfo.processInfo.environment
+        if let override = environment["LOCAL_WISPR_CLEANUP_NUM_PREDICT"].flatMap(Int.init), override > 0 {
+            return override
+        }
 
-        Rules:
-        - Preserve the user's meaning.
-        - Do not add facts, names, dates, links, or commitments.
-        - Fix punctuation and capitalization.
-        - Remove filler words when they do not matter.
-        - Keep names, emails, URLs, code, numbers, and product names as close to the transcript as possible.
-        - If a word is uncertain, prefer the transcript instead of inventing.
-        - Preserve profanity and sensitive wording when the user said it.
-        - Preserve line breaks and list structure when clearly dictated.
-        - Do not explain your changes.
-        - Return only the cleaned text.
-
-        Transcript:
-        <<<
-        \(transcript)
-        >>>
-        """
+        return min(192, max(48, transcript.count / 3 + 32))
     }
 }
 
@@ -86,6 +75,7 @@ private struct GenerateRequest: Encodable {
     let prompt: String
     let stream: Bool
     let think: Bool
+    let keep_alive: String
     let options: Options
 }
 

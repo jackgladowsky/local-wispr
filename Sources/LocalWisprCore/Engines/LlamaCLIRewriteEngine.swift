@@ -29,8 +29,8 @@ struct LlamaCLIRewriteEngine: RewriteEngine {
             executableURL: executableURL,
             arguments: [
                 "-m", modelURL.path,
-                "-p", OllamaRewriteEnginePrompt.prompt(for: transcript.text),
-                "-n", "512",
+                "-p", CleanupPrompt.compact(for: transcript.text),
+                "-n", Self.numPredict(for: transcript.text),
                 "--temp", "0.1",
                 "--no-display-prompt"
             ],
@@ -50,17 +50,15 @@ struct LlamaCLIRewriteEngine: RewriteEngine {
             throw LocalWisprError.cleanupFailed("llama.cpp returned empty text")
         }
 
-        return CleanedText(text: cleaned)
+        return CleanedText(text: cleaned, engineName: name)
     }
-}
 
-private enum OllamaRewriteEnginePrompt {
-    static func prompt(for transcript: String) -> String {
-        """
-        Rewrite this dictated transcript into clean text. Preserve meaning. Do not add facts. Return only the cleaned text.
+    private static func numPredict(for transcript: String) -> String {
+        let environment = ProcessInfo.processInfo.environment
+        if let override = environment["LOCAL_WISPR_CLEANUP_NUM_PREDICT"].flatMap(Int.init), override > 0 {
+            return String(override)
+        }
 
-        Transcript:
-        \(transcript)
-        """
+        return String(min(192, max(48, transcript.count / 3 + 32)))
     }
 }

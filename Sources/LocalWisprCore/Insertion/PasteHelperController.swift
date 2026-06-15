@@ -1,5 +1,8 @@
 import Foundation
 
+// Cross-process paste notification consumed by the stable paste helper app.
+private let pasteHelperPasteNotification = Notification.Name("dev.local-wispr.PasteHelper.paste")
+
 enum PasteHelperController {
     enum Status: Equatable {
         case checking
@@ -64,8 +67,21 @@ enum PasteHelperController {
         _ = await runHelper(arguments: ["--request-permission"], responseTimeout: 3.0)
     }
 
+    static func startResidentIfInstalled() async {
+        guard let appURL else { return }
+        await openHelper(appURL: appURL, arguments: [], wait: false)
+    }
+
     static func paste() async -> PasteResult {
         guard appURL != nil else { return .notInstalled }
+
+        if supportsResidentPaste {
+            await startResidentIfInstalled()
+
+            if let response = await requestResidentPaste(responseTimeout: 0.35) {
+                return pasteResult(for: response)
+            }
+        }
 
         switch await runHelper(arguments: ["--paste"], responseTimeout: 1.5) {
         case "pasted":
@@ -77,6 +93,23 @@ enum PasteHelperController {
         default:
             return .failed
         }
+    }
+
+    private static var supportsResidentPaste: Bool {
+        guard let appURL else { return false }
+        let infoURL = appURL
+            .appendingPathComponent("Contents")
+            .appendingPathComponent("Info.plist")
+        guard
+            let data = try? Data(contentsOf: infoURL),
+            let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+            let version = plist["CFBundleVersion"] as? String,
+            let integerVersion = Int(version)
+        else {
+            return false
+        }
+
+        return integerVersion >= 2
     }
 
     private static var candidateAppURLs: [URL] {
@@ -105,60 +138,107 @@ enum PasteHelperController {
         }
     }
 
+    private static func requestResidentPaste(responseTimeout: TimeInterval) async -> String? {
+        await withResponseFile(responseTimeout: responseTimeout) { responseURL in
+            DistributedNotificationCenter.default().postNotificationName(
+                pasteHelperPasteNotification,
+                object: bundleIdentifier,
+                userInfo: ["responseFile": responseURL.path],
+                deliverImmediately: true
+            )
+        }
+    }
+
     private static func runHelper(arguments: [String], responseTimeout: TimeInterval) async -> String? {
         guard let appURL else { return nil }
 
-        return await Task.detached(priority: .userInitiated) {
-            let fileManager = FileManager.default
-            let responseDirectory = fileManager.temporaryDirectory
-                .appendingPathComponent("LocalWisprPasteHelper", isDirectory: true)
+        return await withResponseFile(responseTimeout: responseTimeout) { responseURL in
+            await openHelper(
+                appURL: appURL,
+                arguments: arguments + ["--response-file", responseURL.path],
+                wait: true
+            )
+        }
+    }
 
-            do {
-                try fileManager.createDirectory(
-                    at: responseDirectory,
-                    withIntermediateDirectories: true
-                )
-            } catch {
-                return nil
-            }
+    private static func withResponseFile(
+        responseTimeout: TimeInterval,
+        action: @escaping @Sendable (URL) async -> Void
+    ) async -> String? {
+        let fileManager = FileManager.default
+        let responseDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent("LocalWisprPasteHelper", isDirectory: true)
 
-            let responseURL = responseDirectory
-                .appendingPathComponent(UUID().uuidString)
-                .appendingPathExtension("txt")
+        do {
+            try fileManager.createDirectory(
+                at: responseDirectory,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            return nil
+        }
+
+        let responseURL = responseDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("txt")
+
+        await action(responseURL)
+
+        let deadline = Date().addingTimeInterval(responseTimeout)
+        while !fileManager.fileExists(atPath: responseURL.path), Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+
+        guard fileManager.fileExists(atPath: responseURL.path) else {
+            return nil
+        }
+
+        do {
+            let response = try String(contentsOf: responseURL, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            try? fileManager.removeItem(at: responseURL)
+            return response.isEmpty ? nil : response
+        } catch {
+            try? fileManager.removeItem(at: responseURL)
+            return nil
+        }
+    }
+
+    private static func openHelper(appURL: URL, arguments: [String], wait: Bool) async {
+        await Task.detached(priority: .userInitiated) {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-            process.arguments = [
-                "-g",
-                "-j",
-                "-n",
-                "-W",
-                appURL.path,
-                "--args"
-            ] + arguments + ["--response-file", responseURL.path]
+            process.arguments = ["-g", "-j"] + (wait ? ["-n", "-W"] : []) + [appURL.path]
+
+            if !arguments.isEmpty {
+                process.arguments?.append("--args")
+                process.arguments?.append(contentsOf: arguments)
+            }
+
             process.standardOutput = Pipe()
             process.standardError = Pipe()
 
             do {
                 try process.run()
-                process.waitUntilExit()
-
-                let deadline = Date().addingTimeInterval(responseTimeout)
-                while !fileManager.fileExists(atPath: responseURL.path), Date() < deadline {
-                    try? await Task.sleep(for: .milliseconds(50))
+                if wait {
+                    process.waitUntilExit()
                 }
-
-                guard fileManager.fileExists(atPath: responseURL.path) else {
-                    return nil
-                }
-
-                let response = try String(contentsOf: responseURL, encoding: .utf8)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                try? fileManager.removeItem(at: responseURL)
-                return response.isEmpty ? nil : response
             } catch {
-                try? fileManager.removeItem(at: responseURL)
-                return nil
+                return
             }
         }.value
+    }
+
+    private static func pasteResult(for response: String) -> PasteResult {
+        switch response {
+        case "pasted":
+            .pasted
+        case "needsPermission":
+            .needsPermission
+        case "secureTarget":
+            .secureTarget
+        default:
+            .failed
+        }
     }
 }

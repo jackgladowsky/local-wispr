@@ -14,6 +14,10 @@ enum EngineRegistry {
     static func makeRewriteEngine() -> RewriteEngine {
         let fallback = RuleBasedRewriteEngine()
 
+        if let llamaServer = LlamaServerRewriteEngine.discover() {
+            return FallbackRewriteEngine(primary: llamaServer, fallback: fallback)
+        }
+
         if let ollama = OllamaRewriteEngine.discover() {
             return FallbackRewriteEngine(primary: ollama, fallback: fallback)
         }
@@ -34,7 +38,9 @@ enum EngineRegistry {
         }
 
         let cleanup: String
-        if let ollama = OllamaRewriteEngine.discover() {
+        if let llamaServer = LlamaServerRewriteEngine.discover() {
+            cleanup = "Cleanup: \(llamaServer.name)"
+        } else if let ollama = OllamaRewriteEngine.discover() {
             cleanup = "Cleanup: \(ollama.name)"
         } else if let llama = LlamaCLIRewriteEngine.discover() {
             cleanup = "Cleanup: \(llama.name)"
@@ -55,6 +61,8 @@ struct MissingSTTEngine: STTEngine {
     }
 }
 
+private struct CleanupBudgetExceeded: Error {}
+
 struct FallbackRewriteEngine: RewriteEngine {
     let primary: RewriteEngine
     let fallback: RewriteEngine
@@ -64,10 +72,39 @@ struct FallbackRewriteEngine: RewriteEngine {
     }
 
     func rewrite(_ transcript: Transcript) async throws -> CleanedText {
+        if CleanupPrompt.shouldUseFastLocalCleanup(for: transcript.text) {
+            return try await fallback.rewrite(transcript)
+        }
+
         do {
-            return try await primary.rewrite(transcript)
+            return try await rewriteWithBudget(transcript)
         } catch {
             return try await fallback.rewrite(transcript)
+        }
+    }
+
+    private func rewriteWithBudget(_ transcript: Transcript) async throws -> CleanedText {
+        let budget = Int(ProcessInfo.processInfo.environment["LOCAL_WISPR_LLM_CLEANUP_BUDGET_MS"] ?? "650") ?? 650
+        guard budget > 0 else {
+            return try await primary.rewrite(transcript)
+        }
+
+        return try await withThrowingTaskGroup(of: CleanedText.self) { group in
+            group.addTask {
+                try await primary.rewrite(transcript)
+            }
+            group.addTask {
+                try await Task.sleep(for: .milliseconds(budget))
+                throw CleanupBudgetExceeded()
+            }
+
+            defer { group.cancelAll() }
+
+            guard let result = try await group.next() else {
+                throw CleanupBudgetExceeded()
+            }
+
+            return result
         }
     }
 }

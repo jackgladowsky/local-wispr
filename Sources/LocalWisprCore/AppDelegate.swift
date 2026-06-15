@@ -29,6 +29,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupStatusItem()
         observeAutoPasteAvailability()
+        Task {
+            await PasteHelperController.startResidentIfInstalled()
+        }
         setupHotkey(for: session, panelController: panelController)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self, weak panelController] in
             guard let self, let panelController else { return }

@@ -93,7 +93,27 @@ Ollama is optional. To install only the speech-to-text path and use the built-in
 LOCAL_WISPR_WITH_OLLAMA=0 scripts/setup-local-engines.sh
 ```
 
-After changing engines, choose **Reload Engines** from the Local Wispr menu or relaunch the app.
+Latency-oriented cleanup knobs:
+
+```sh
+# Skip the LLM for short/simple transcripts and use local rules instead. Default: 120 chars.
+LOCAL_WISPR_FAST_CLEANUP_MAX_CHARS=120
+
+# Cap LLM cleanup time before falling back to local rules. Default: 650 ms.
+LOCAL_WISPR_LLM_CLEANUP_BUDGET_MS=650
+
+# Cap cleanup generation length. Default is dynamic, max 192 tokens.
+LOCAL_WISPR_CLEANUP_NUM_PREDICT=128
+```
+
+You can also run a warmed `llama.cpp` server instead of Ollama:
+
+```sh
+LOCAL_WISPR_REWRITE_ENGINE=llama-server
+LOCAL_WISPR_LLAMA_SERVER_URL=http://127.0.0.1:8080/completion
+```
+
+After changing engines or environment variables, choose **Reload Engines** from the Local Wispr menu or relaunch the app from the same environment.
 
 ## Build and Install
 
@@ -117,7 +137,7 @@ scripts/install-app.sh
 
 Avoid authorizing app bundles directly from `dist/`. Rebuilds can make macOS treat those bundles as changed apps, which often breaks Accessibility trust.
 
-By default, `install-app.sh` preserves an existing paste helper to keep its Accessibility permission stable. To intentionally replace the helper:
+By default, `install-app.sh` preserves an existing paste helper to keep its Accessibility permission stable. When the helper bundle version increases, the script updates it and warns that Accessibility may need approval again. To intentionally replace the helper:
 
 ```sh
 LOCAL_WISPR_UPDATE_HELPER=1 scripts/install-app.sh
@@ -162,7 +182,7 @@ Export raw timing rows as CSV:
 scripts/benchmark-timings.sh --csv > timings.csv
 ```
 
-New timing logs include stage-level fields such as `hotkey_to_recording_ms`, `audio_start_ms`, `audio_stop_ms`, `stt_ms`, `rewrite_ms`, `insert_ms`, and `release_to_output_ms`. The most important user-facing metric is `release_to_output_ms`: time from releasing the hotkey to pasted/copied output.
+New timing logs include stage-level fields such as `hotkey_to_recording_ms`, `audio_start_ms`, `audio_stop_ms`, `stt_ms`, `rewrite_ms`, `insert_ms`, `cleanup_engine_used`, and `release_to_output_ms`. The most important user-facing metric is `release_to_output_ms`: time from releasing the hotkey to pasted/copied output.
 
 ## Architecture
 

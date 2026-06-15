@@ -25,7 +25,8 @@ struct MockRewriteEngine: RewriteEngine {
         try await Task.sleep(for: .milliseconds(220))
 
         return CleanedText(
-            text: RuleBasedRewriteEngine.cleanup(transcript.text)
+            text: RuleBasedRewriteEngine.cleanup(transcript.text),
+            engineName: name
         )
     }
 }

@@ -28,6 +28,12 @@ struct Transcript: Equatable, Sendable {
 
 struct CleanedText: Equatable, Sendable {
     let text: String
+    let engineName: String?
+
+    init(text: String, engineName: String? = nil) {
+        self.text = text
+        self.engineName = engineName
+    }
 }
 
 protocol STTEngine: Sendable {

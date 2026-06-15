@@ -26,24 +26,39 @@ if pgrep -x LocalWisprPasteHelper >/dev/null 2>&1; then
     sleep 0.2
 fi
 
-if [[ -d "$INSTALLED_APP" ]]; then
-    rm -rf "$INSTALLED_APP/Contents"
-    mkdir -p "$INSTALLED_APP"
-    ditto "$BUILT_APP/Contents" "$INSTALLED_APP/Contents"
-else
-    ditto "$BUILT_APP" "$INSTALLED_APP"
-fi
+bundle_version() {
+    local app="$1"
+    /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist" 2>/dev/null || echo 0
+}
 
-if [[ -d "$INSTALLED_HELPER" && "${LOCAL_WISPR_UPDATE_HELPER:-0}" != "1" ]]; then
+install_bundle_contents() {
+    local source_app="$1"
+    local target_app="$2"
+
+    if [[ -d "$target_app" ]]; then
+        rm -rf "$target_app/Contents"
+        mkdir -p "$target_app"
+        ditto "$source_app/Contents" "$target_app/Contents"
+    else
+        ditto "$source_app" "$target_app"
+    fi
+}
+
+install_bundle_contents "$BUILT_APP" "$INSTALLED_APP"
+
+BUILT_HELPER_VERSION="$(bundle_version "$BUILT_HELPER")"
+INSTALLED_HELPER_VERSION="$(bundle_version "$INSTALLED_HELPER")"
+
+if [[ -d "$INSTALLED_HELPER" \
+    && "${LOCAL_WISPR_UPDATE_HELPER:-0}" != "1" \
+    && "$INSTALLED_HELPER_VERSION" -ge "$BUILT_HELPER_VERSION" ]]; then
     echo "Keeping existing paste helper for stable Accessibility trust: $INSTALLED_HELPER" >&2
 else
-    if [[ -d "$INSTALLED_HELPER" ]]; then
-        rm -rf "$INSTALLED_HELPER/Contents"
-        mkdir -p "$INSTALLED_HELPER"
-        ditto "$BUILT_HELPER/Contents" "$INSTALLED_HELPER/Contents"
-    else
-        ditto "$BUILT_HELPER" "$INSTALLED_HELPER"
+    if [[ -d "$INSTALLED_HELPER" && "${LOCAL_WISPR_UPDATE_HELPER:-0}" != "1" ]]; then
+        echo "Updating paste helper from version $INSTALLED_HELPER_VERSION to $BUILT_HELPER_VERSION." >&2
+        echo "You may need to re-approve Local Wispr Paste Helper in Accessibility." >&2
     fi
+    install_bundle_contents "$BUILT_HELPER" "$INSTALLED_HELPER"
 fi
 
 codesign --verify --deep --strict "$INSTALLED_HELPER"

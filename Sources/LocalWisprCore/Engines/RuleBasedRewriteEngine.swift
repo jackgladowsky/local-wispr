@@ -8,7 +8,7 @@ struct RuleBasedRewriteEngine: RewriteEngine {
         guard !cleaned.isEmpty else {
             throw LocalWisprError.emptyTranscript
         }
-        return CleanedText(text: cleaned)
+        return CleanedText(text: cleaned, engineName: name)
     }
 
     static func cleanup(_ input: String) -> String {

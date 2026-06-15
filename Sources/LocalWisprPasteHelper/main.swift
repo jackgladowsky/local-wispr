@@ -3,6 +3,8 @@ import ApplicationServices
 import CoreGraphics
 import Foundation
 
+private let pasteHelperPasteNotification = Notification.Name("dev.local-wispr.PasteHelper.paste")
+
 private enum ExitCode {
     static let success: Int32 = 0
     static let needsPermission: Int32 = 2
@@ -26,11 +28,14 @@ private var isTrustedForPaste: Bool {
 
 @MainActor
 private func finish(_ response: String, code: Int32) -> Never {
-    if let responseFileURL {
-        try? response.write(to: responseFileURL, atomically: true, encoding: .utf8)
-    }
-
+    writeResponse(response, to: responseFileURL)
     exit(code)
+}
+
+@MainActor
+private func writeResponse(_ response: String, to url: URL?) {
+    guard let url else { return }
+    try? response.write(to: url, atomically: true, encoding: .utf8)
 }
 
 private func requestAccessibilityPrompt() {
@@ -40,6 +45,20 @@ private func requestAccessibilityPrompt() {
 
     _ = AXIsProcessTrustedWithOptions(options)
     _ = CGRequestPostEventAccess()
+}
+
+@MainActor
+private func performPaste() -> String {
+    guard isTrustedForPaste else {
+        return "needsPermission"
+    }
+
+    guard !isSecureTargetCurrentFocus() else {
+        return "secureTarget"
+    }
+
+    postPasteShortcut()
+    return "pasted"
 }
 
 private func postPasteShortcut() {
@@ -98,6 +117,24 @@ private func attributeString(_ element: AXUIElement, _ attribute: String) -> Str
     return value as? String
 }
 
+@MainActor
+private func runResidentPasteHelper() -> Never {
+    DistributedNotificationCenter.default().addObserver(
+        forName: pasteHelperPasteNotification,
+        object: nil,
+        queue: .main
+    ) { notification in
+        let responsePath = notification.userInfo?["responseFile"] as? String
+        Task { @MainActor in
+            let responseURL = responsePath.map { URL(fileURLWithPath: $0) }
+            writeResponse(performPaste(), to: responseURL)
+        }
+    }
+
+    RunLoop.main.run()
+    exit(ExitCode.success)
+}
+
 if argumentSet.contains("--request-permission") {
     requestAccessibilityPrompt()
     Thread.sleep(forTimeInterval: 0.75)
@@ -115,16 +152,15 @@ if argumentSet.contains("--check") {
 }
 
 if argumentSet.contains("--paste") {
-    guard isTrustedForPaste else {
-        finish("needsPermission", code: ExitCode.needsPermission)
-    }
+    let response = performPaste()
+    finish(
+        response,
+        code: response == "pasted" ? ExitCode.success : (response == "secureTarget" ? ExitCode.secureTarget : ExitCode.needsPermission)
+    )
+}
 
-    guard !isSecureTargetCurrentFocus() else {
-        finish("secureTarget", code: ExitCode.secureTarget)
-    }
-
-    postPasteShortcut()
-    finish("pasted", code: ExitCode.success)
+if rawArguments.isEmpty {
+    runResidentPasteHelper()
 }
 
 requestAccessibilityPrompt()
