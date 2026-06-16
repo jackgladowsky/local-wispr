@@ -10,7 +10,7 @@ The project is currently an early macOS prototype focused on proving the end-to-
 - **Native macOS UX**: menu bar app, no Dock icon, floating status panel, SwiftUI settings.
 - **Hold-to-dictate hotkey**: press and hold `Control` + `Option` + `Space`; release to process.
 - **Local speech-to-text**: `whisper.cpp` CLI adapter with a default local Whisper model.
-- **Local cleanup**: optional Ollama rewrite model with a basic local cleanup fallback.
+- **Local cleanup**: optional `llama.cpp` rewrite model with a basic local cleanup fallback.
 - **Safe insertion**: clipboard-preserving paste with focus checks and secure-field avoidance.
 - **Permission-resilient paste helper**: a stable helper app can own Accessibility permission across main-app rebuilds.
 
@@ -61,7 +61,7 @@ scripts/reset-permissions.sh
 
 ## Local Engine Setup
 
-Install `whisper.cpp`, download the default Whisper model, install Ollama, and pull the default cleanup model:
+Install `whisper.cpp`, download the default Whisper model, install `llama.cpp`, and download the default local cleanup model:
 
 ```sh
 scripts/setup-local-engines.sh
@@ -72,7 +72,7 @@ The default engine locations are:
 ```text
 whisper-cli:          /opt/homebrew/bin/whisper-cli or PATH
 Whisper model:        ~/Library/Application Support/LocalWispr/Models/whisper/ggml-base.en.bin
-Ollama cleanup model: qwen3:0.6b
+llama.cpp cleanup model: ~/Library/Application Support/LocalWispr/Models/cleanup/cleanup.gguf
 ```
 
 Check engine status:
@@ -87,10 +87,10 @@ Smoke-test local engine responses:
 scripts/smoke-local-engines.sh
 ```
 
-Ollama is optional. To install only the speech-to-text path and use the built-in cleanup fallback:
+`llama.cpp` cleanup is optional. To install only the speech-to-text path and use the built-in cleanup fallback:
 
 ```sh
-LOCAL_WISPR_WITH_OLLAMA=0 scripts/setup-local-engines.sh
+LOCAL_WISPR_WITH_LLAMA_CPP=0 scripts/setup-local-engines.sh
 ```
 
 Latency-oriented cleanup knobs:
@@ -102,16 +102,24 @@ LOCAL_WISPR_FAST_CLEANUP_MAX_CHARS=120
 # Cap LLM cleanup time before falling back to local rules. Default: 650 ms.
 LOCAL_WISPR_LLM_CLEANUP_BUDGET_MS=650
 
-# Cap cleanup generation length. Default is dynamic, max 192 tokens.
+# Override cleanup generation length. App default is dynamic (38–192 tokens).
+# The synthetic rewrite benchmark uses 9 tokens for the current fixture mix.
 LOCAL_WISPR_CLEANUP_NUM_PREDICT=128
 ```
 
-You can also run a warmed `llama.cpp` server instead of Ollama:
+For lower cleanup latency, run a warmed `llama.cpp` server and launch Local Wispr with:
 
 ```sh
-LOCAL_WISPR_REWRITE_ENGINE=llama-server
-LOCAL_WISPR_LLAMA_SERVER_URL=http://127.0.0.1:8080/completion
+LOCAL_WISPR_LLAMA_GPU_LAYERS=999 \
+LOCAL_WISPR_LLAMA_EXTRA_ARGS="--parallel 4 --log-disable --spec-type ngram-mod --spec-ngram-mod-n-min 16 --spec-ngram-mod-n-max 32 --spec-ngram-mod-n-match 12" \
+  scripts/start-llama-server.sh
+
+LOCAL_WISPR_REWRITE_ENGINE=llama-server \
+LOCAL_WISPR_LLAMA_SERVER_URL=http://127.0.0.1:8080/completion \
+  scripts/install-app.sh
 ```
+
+Without a running `llama-server`, Local Wispr uses Basic Local Cleanup instead of launching a slow per-request model process. Cleanup server URLs must be loopback (`127.0.0.1`, `localhost`, or `::1`) unless `LOCAL_WISPR_ALLOW_NON_LOOPBACK_LLAMA=1` is explicitly set for a non-sensitive synthetic run.
 
 After changing engines or environment variables, choose **Reload Engines** from the Local Wispr menu or relaunch the app from the same environment.
 
@@ -164,6 +172,18 @@ Inspect signing state:
 scripts/signing-status.sh
 ```
 
+## Release Packaging
+
+Build release-ready DMG/ZIP assets locally:
+
+```sh
+scripts/package-release.sh
+```
+
+Assets are written to `dist/release/` with checksums. GitHub releases are packaged by `.github/workflows/release.yml`, which runs tests, builds the app bundles, creates a DMG/ZIP, optionally notarizes the DMG, and uploads assets to the release.
+
+Public releases should use protected `vMAJOR.MINOR.PATCH` tags plus Developer ID signing/notarization secrets in the GitHub `release` environment. See [`docs/release.md`](docs/release.md).
+
 ## Benchmarking
 
 Local Wispr writes one timing line per dictation session to:
@@ -171,6 +191,8 @@ Local Wispr writes one timing line per dictation session to:
 ```text
 ~/Library/Logs/LocalWispr/mock-flow.log
 ```
+
+For isolated benchmark runs, launch with `LOCAL_WISPR_TIMING_LOG=/path/to/run.log`.
 
 Summarize the full pipeline:
 
@@ -189,6 +211,42 @@ Export raw timing rows as CSV:
 ```sh
 scripts/benchmark-timings.sh --csv > timings.csv
 ```
+
+Replay the text-only rewrite/cleanup benchmark used for autonomous optimization:
+
+```sh
+scripts/benchmark-rewrite-loop.sh --format table
+./.auto/measure.sh
+```
+
+`.auto/measure.sh` manages a loopback `llama-server` by default for LLM-focused runs, so server knobs such as context size, threads, GPU layers, batch size, model path, and extra llama.cpp args can be part of optimization.
+
+The rewrite benchmark emits `METRIC` lines for `objective_error`, `rewrite_ms_p95`, `rewrite_ms_median`, `quality_score`, `failed_cases`, `fallback_runs`, and cleanup-engine counts. It uses synthetic text fixtures in `Tests/Fixtures/rewrite-benchmark.json`; see [`docs/llm-optimization-loop.md`](docs/llm-optimization-loop.md).
+
+Latest local verification (`./.auto/measure.sh`, managed loopback llama-server, 4 synthetic fixtures × 5 measured iterations, 1 warmup):
+
+| Metric | Value |
+| --- | ---: |
+| `objective_error` | 41.992 |
+| `rewrite_ms_p95` | 41.992 ms |
+| `rewrite_ms_median` | 1.585 ms |
+| `rewrite_ms_avg` | 11.283 ms |
+| `quality_score` | 1.000 |
+| `failed_cases` | 0 |
+| `llama_runs` / `local_cleanup_runs` | 5 / 15 |
+
+Direct raw `llama-server` roundtrip benchmark, excluding STT/routing/insertion overhead:
+
+```sh
+./.auto/measure-raw-llama.sh
+```
+
+Latest local verification (`chatml-filler`, `n_predict=38`, `temperature=0`, `cache_prompt=1`, ngram speculative decoding, 60 measured / 8 warmup):
+
+| Raw llama-server phase | Avg | Median | P95 | Invalid |
+| --- | ---: | ---: | ---: | ---: |
+| Repeated/cache-friendly | 30.321 ms | 30.283 ms | 30.858 ms | 0 |
+| Varied cleanup prompts | 53.549 ms | 48.613 ms | 80.327 ms | 0 |
 
 New timing logs include stage-level fields such as `hotkey_to_recording_ms`, `audio_start_ms`, `audio_stop_ms`, `stt_ms`, `rewrite_ms`, `insert_ms`, `cleanup_engine_used`, and `release_to_output_ms`. The most important user-facing metric is `release_to_output_ms`: time from releasing the hotkey to pasted/copied output.
 
@@ -216,7 +274,7 @@ Local Wispr is designed to run without cloud transcription or analytics.
 - Audio is captured locally and sent to local engines only.
 - The default Whisper model is stored under Application Support.
 - Timing/debug logs are written locally to `~/Library/Logs/LocalWispr/mock-flow.log`.
-- Ollama, when enabled, runs against the local Ollama server at `127.0.0.1:11434`.
+- Cleanup uses Basic Local Cleanup by default, or an explicitly configured local `llama-server` loopback endpoint.
 - Setup scripts download open local model artifacts and Homebrew packages as needed.
 
 ## Troubleshooting
@@ -253,13 +311,13 @@ If `whisper-cli` or the model is missing, run:
 scripts/setup-local-engines.sh
 ```
 
-### Ollama cleanup is unavailable
+### llama.cpp cleanup is unavailable
 
-Local Wispr can still run with the basic cleanup fallback. If you want Ollama cleanup, make sure the service is running and the model is pulled:
+Local Wispr can still run with the basic cleanup fallback. If you want `llama.cpp` cleanup, install the local engines and check model status:
 
 ```sh
-brew services start ollama
-ollama pull qwen3:0.6b
+scripts/setup-local-engines.sh
+scripts/check-local-engines.sh
 ```
 
 ## Scripts
@@ -271,7 +329,12 @@ ollama pull qwen3:0.6b
 | `scripts/setup-local-engines.sh` | Install local STT and optional cleanup dependencies |
 | `scripts/check-local-engines.sh` | Print local engine availability |
 | `scripts/smoke-local-engines.sh` | Run a small local engine smoke test |
+| `scripts/start-llama-server.sh` | Start a warmed local `llama.cpp` cleanup server |
 | `scripts/benchmark-timings.sh` | Summarize full-pipeline timing logs |
+| `scripts/benchmark-rewrite-loop.sh` | Replay synthetic rewrite/cleanup fixtures and emit optimization metrics |
+| `scripts/preflight-autoresearch.sh` | Check privacy/artifact/endpoint guardrails before long optimization runs |
+| `scripts/with-llama-server.sh` | Run a command under a managed loopback llama-server with benchmark-tunable server params |
+| `scripts/check-release-artifacts.sh` | Scan release staging/output paths for benchmark, log, audio, model, or cert artifacts |
 | `scripts/reset-permissions.sh` | Reset macOS TCC records for Local Wispr and the paste helper, including Accessibility/PostEvent/ListenEvent |
 | `scripts/signing-status.sh` | Show signing identities and current app signatures |
 

@@ -1,0 +1,238 @@
+name: Release macOS app
+
+on:
+  push:
+    tags:
+      - "v*"
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Optional tag to create/update when publishing assets, for example v0.1.0"
+        required: false
+        type: string
+      upload_to_release:
+        description: "Upload generated assets to the tag's GitHub Release"
+        required: false
+        default: false
+        type: boolean
+      allow_unnotarized_release:
+        description: "Emergency/manual only: allow publishing without Developer ID signing + notarization"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.tag_name || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Build, package, and publish
+    runs-on: macos-15
+    environment:
+      name: release
+    env:
+      DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.LOCAL_WISPR_DEVELOPER_ID_CERTIFICATE_BASE64 }}
+      DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.LOCAL_WISPR_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+      REQUESTED_CODESIGN_IDENTITY: ${{ secrets.LOCAL_WISPR_CODESIGN_IDENTITY }}
+      LOCAL_WISPR_NOTARY_APPLE_ID: ${{ secrets.LOCAL_WISPR_NOTARY_APPLE_ID }}
+      LOCAL_WISPR_NOTARY_PASSWORD: ${{ secrets.LOCAL_WISPR_NOTARY_PASSWORD }}
+      LOCAL_WISPR_NOTARY_TEAM_ID: ${{ secrets.LOCAL_WISPR_NOTARY_TEAM_ID }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          swift --version
+
+      - name: Resolve release metadata
+        id: release-meta
+        env:
+          EVENT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          set -euo pipefail
+
+          tag_name=""
+          if [[ -n "${EVENT_RELEASE_TAG:-}" ]]; then
+            tag_name="$EVENT_RELEASE_TAG"
+          elif [[ -n "${INPUT_TAG_NAME:-}" ]]; then
+            tag_name="$INPUT_TAG_NAME"
+          elif [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            tag_name="$GITHUB_REF_NAME"
+          fi
+
+          source_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Packaging/Info.plist)"
+          version="$source_version"
+          if [[ -n "$tag_name" ]]; then
+            version="${tag_name#v}"
+          fi
+
+          echo "tag_name=$tag_name" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Packaging version $version${tag_name:+ from tag $tag_name}"
+
+      - name: Validate release guardrails
+        env:
+          TAG_NAME: ${{ steps.release-meta.outputs.tag_name }}
+          ALLOW_UNNOTARIZED_RELEASE: ${{ inputs.allow_unnotarized_release }}
+        run: |
+          set -euo pipefail
+
+          publishing=0
+          if [[ "$GITHUB_EVENT_NAME" == "release" || "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            publishing=1
+          elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "${{ inputs.upload_to_release }}" == "true" ]]; then
+            publishing=1
+          fi
+
+          if [[ "$publishing" == "0" ]]; then
+            echo "Not publishing to a GitHub Release; release guardrails are informational only."
+            exit 0
+          fi
+
+          if [[ -z "$TAG_NAME" ]]; then
+            echo "Publishing requires a tag name." >&2
+            exit 1
+          fi
+
+          if [[ ! "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must look like vMAJOR.MINOR.PATCH, got: $TAG_NAME" >&2
+            exit 1
+          fi
+
+          has_signing=0
+          if [[ -n "${DEVELOPER_ID_CERTIFICATE_BASE64:-}" && -n "${DEVELOPER_ID_CERTIFICATE_PASSWORD:-}" ]]; then
+            has_signing=1
+          fi
+
+          has_notary=0
+          if [[ -n "${LOCAL_WISPR_NOTARY_APPLE_ID:-}" \
+              && -n "${LOCAL_WISPR_NOTARY_PASSWORD:-}" \
+              && -n "${LOCAL_WISPR_NOTARY_TEAM_ID:-}" ]]; then
+            has_notary=1
+          fi
+
+          if [[ "$has_signing" != "1" || "$has_notary" != "1" ]]; then
+            if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "$ALLOW_UNNOTARIZED_RELEASE" == "true" ]]; then
+              echo "WARNING: publishing an unnotarized release because allow_unnotarized_release=true."
+            else
+              echo "Refusing to publish an unsigned/unnotarized macOS release." >&2
+              echo "Configure Developer ID + notarization secrets in the protected release environment," >&2
+              echo "or run workflow_dispatch with allow_unnotarized_release=true for an explicit emergency/manual exception." >&2
+              exit 1
+            fi
+          fi
+
+      - name: Import Developer ID certificate
+        if: ${{ env.DEVELOPER_ID_CERTIFICATE_BASE64 != '' }}
+        env:
+          CERT_BASE64: ${{ env.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          CERT_PASSWORD: ${{ env.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          cert_path="$RUNNER_TEMP/developer-id.p12"
+          keychain_path="$RUNNER_TEMP/local-wispr-signing.keychain-db"
+          keychain_password="$(uuidgen)"
+
+          CERT_PATH="$cert_path" python3 - <<'PY'
+          import base64
+          import os
+          import pathlib
+
+          pathlib.Path(os.environ["CERT_PATH"]).write_bytes(
+              base64.b64decode(os.environ["CERT_BASE64"])
+          )
+          PY
+
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$cert_path" \
+            -P "$CERT_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$keychain_path"
+          security list-keychain -d user -s "$keychain_path" login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain_path"
+
+          identity="${REQUESTED_CODESIGN_IDENTITY:-}"
+          if [[ -z "$identity" ]]; then
+            identity="$(security find-identity -v -p codesigning "$keychain_path" | awk -F '"' '/Developer ID Application/ { print $2; exit } /"/ { print $2; exit }')"
+          fi
+
+          if [[ -z "$identity" ]]; then
+            echo "No code signing identity found after importing certificate" >&2
+            exit 1
+          fi
+
+          echo "LOCAL_WISPR_CODESIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+          echo "Using code signing identity: $identity"
+
+      - name: Run tests
+        run: swift test
+
+      - name: Package release assets
+        env:
+          LOCAL_WISPR_RELEASE_VERSION: ${{ steps.release-meta.outputs.version }}
+          LOCAL_WISPR_BUILD_NUMBER: ${{ github.run_number }}
+        run: scripts/package-release.sh
+
+      - name: Notarize DMG when credentials are configured
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${LOCAL_WISPR_CODESIGN_IDENTITY:-}" \
+              || -z "${LOCAL_WISPR_NOTARY_APPLE_ID:-}" \
+              || -z "${LOCAL_WISPR_NOTARY_PASSWORD:-}" \
+              || -z "${LOCAL_WISPR_NOTARY_TEAM_ID:-}" ]]; then
+            echo "Skipping notarization; Developer ID signing and notary credentials are not fully configured."
+            exit 0
+          fi
+
+          scripts/notarize-release.sh dist/release/*.dmg
+          (
+            cd dist/release
+            shasum -a 256 LocalWispr-*.dmg LocalWispr-*.zip > SHA256SUMS.txt
+          )
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalWispr-macOS-${{ steps.release-meta.outputs.version }}
+          path: dist/release/*
+          if-no-files-found: error
+
+      - name: Upload assets to GitHub Release
+        if: ${{ github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.upload_to_release) }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ steps.release-meta.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$TAG_NAME" ]]; then
+            echo "No tag name resolved; provide workflow_dispatch tag_name to publish assets." >&2
+            exit 1
+          fi
+
+          assets=(dist/release/LocalWispr-*.dmg dist/release/LocalWispr-*.zip dist/release/SHA256SUMS.txt)
+
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" "${assets[@]}" --clobber
+          else
+            gh release create "$TAG_NAME" "${assets[@]}" \
+              --title "Local Wispr $TAG_NAME" \
+              --generate-notes \
+              --target "$GITHUB_SHA"
+          fi

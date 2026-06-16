@@ -61,7 +61,26 @@ final class AudioCapture: @unchecked Sendable {
         }
 
         engine.prepare()
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            inputNode.removeTap(onBus: 0)
+            engine.stop()
+
+            let urls = lock.withLock {
+                let urls = [self.rawURL].compactMap { $0 }
+                self.audioFile = nil
+                self.rawURL = nil
+                self.startedAt = nil
+                return urls
+            }
+
+            for url in urls {
+                try? FileManager.default.removeItem(at: url)
+            }
+
+            throw error
+        }
     }
 
     func stop() throws -> AudioRecording {
@@ -87,7 +106,13 @@ final class AudioCapture: @unchecked Sendable {
         }
 
         let wavURL = rawURL.deletingPathExtension().appendingPathExtension("wav")
-        try Self.convertToWhisperReadyWav(rawURL: rawURL, wavURL: wavURL)
+        do {
+            try Self.convertToWhisperReadyWav(rawURL: rawURL, wavURL: wavURL)
+        } catch {
+            try? FileManager.default.removeItem(at: rawURL)
+            try? FileManager.default.removeItem(at: wavURL)
+            throw error
+        }
 
         return AudioRecording(
             rawURL: rawURL,

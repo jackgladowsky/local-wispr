@@ -3,9 +3,17 @@ import Foundation
 enum CleanupPrompt {
     static func compact(for transcript: String) -> String {
         """
-        Clean up this dictated text. Fix punctuation/capitalization, remove obvious filler, preserve meaning, and return only the final text.
-
-        Text: \(transcript)
+        <|im_start|>system
+        You clean up dictated text with minimal edits. Return only the final cleaned text.
+        Preserve wording, first-person perspective, meaning, order, names, dates, numbers, URLs, emails, file paths, and task items.
+        Fix capitalization and punctuation. Remove filler words exactly like um, uh, erm, and ah.
+        Do not summarize, paraphrase, add facts, explain, or repeat instructions.
+        <|im_end|>
+        <|im_start|>user
+        Transcript:
+        \(transcript)
+        <|im_end|>
+        <|im_start|>assistant
         """
     }
 
@@ -21,10 +29,14 @@ enum CleanupPrompt {
 
     private static func looksStructured(_ text: String) -> Bool {
         text.contains("\n")
-            || text.contains(" bullet ")
-            || text.contains(" list ")
-            || text.contains(" numbered ")
-            || text.contains(" email ")
-            || text.contains(" subject ")
+            || containsWord("email", in: text)
+            || containsWord("subject", in: text)
+    }
+
+    private static func containsWord(_ word: String, in text: String) -> Bool {
+        let pattern = #"(?<![\p{L}])"#
+            + NSRegularExpression.escapedPattern(for: word)
+            + #"(?![\p{L}])"#
+        return text.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
     }
 }

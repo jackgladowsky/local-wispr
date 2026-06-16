@@ -18,14 +18,6 @@ enum EngineRegistry {
             return FallbackRewriteEngine(primary: llamaServer, fallback: fallback)
         }
 
-        if let ollama = OllamaRewriteEngine.discover() {
-            return FallbackRewriteEngine(primary: ollama, fallback: fallback)
-        }
-
-        if let llama = LlamaCLIRewriteEngine.discover() {
-            return FallbackRewriteEngine(primary: llama, fallback: fallback)
-        }
-
         return fallback
     }
 
@@ -40,10 +32,6 @@ enum EngineRegistry {
         let cleanup: String
         if let llamaServer = LlamaServerRewriteEngine.discover() {
             cleanup = "Cleanup: \(llamaServer.name)"
-        } else if let ollama = OllamaRewriteEngine.discover() {
-            cleanup = "Cleanup: \(ollama.name)"
-        } else if let llama = LlamaCLIRewriteEngine.discover() {
-            cleanup = "Cleanup: \(llama.name)"
         } else {
             cleanup = "Cleanup: Basic local rules"
         }

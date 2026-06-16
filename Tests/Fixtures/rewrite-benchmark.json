@@ -1,0 +1,30 @@
+[
+  {
+    "id": "meeting-followup",
+    "transcript": "um can you send john the notes from the meeting and ask if friday works uh also mention that we can move it if needed",
+    "expectedContains": ["John", "Friday", "meeting"],
+    "forbiddenContains": ["um", "uh"],
+    "notes": "Common short note; should often stay on fast local cleanup."
+  },
+  {
+    "id": "email-subject",
+    "transcript": "please write an email subject about moving the product review to monday and mention that the beta feedback is ready",
+    "expectedContains": ["product review", "Monday", "beta feedback"],
+    "forbiddenContains": ["um", "uh"],
+    "notes": "Structured short input; production fallback routes this to the LLM when llama-server is configured."
+  },
+  {
+    "id": "long-status-update",
+    "transcript": "i finished the app packaging checklist and the permission reset script is working now but we still need to check the release notes and make sure the local cleanup model does not slow down the hotkey release path when the user only dictates a short sentence",
+    "expectedContains": ["app packaging checklist", "permission reset", "release notes", "hotkey release"],
+    "forbiddenContains": ["um", "uh"],
+    "notes": "Long enough to exercise the LLM cleanup route in production mode when available."
+  },
+  {
+    "id": "list-request",
+    "transcript": "make this a bullet list first check microphone permission second run the local engine smoke test third summarize the timing log",
+    "expectedContains": ["microphone permission", "local engine smoke test", "timing log"],
+    "forbiddenContains": ["um", "uh"],
+    "notes": "Structured list request; useful for validating that cleanup preserves intent."
+  }
+]

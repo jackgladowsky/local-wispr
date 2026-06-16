@@ -19,3 +19,24 @@ func elapsedMillisecondsReturnsDurationForMarks() async throws {
     let elapsed = try #require(trace.elapsedMilliseconds(from: "start", to: "end"))
     #expect(elapsed >= 1)
 }
+
+@Test
+func elapsedMillisecondsUsesFirstMatchingMarks() async throws {
+    let trace = TimingTrace()
+    trace.mark("start")
+    try await Task.sleep(for: .milliseconds(2))
+    trace.mark("start")
+    trace.mark("end")
+
+    let elapsed = try #require(trace.elapsedMilliseconds(from: "start", to: "end"))
+    #expect(elapsed >= 1)
+}
+
+@Test
+func traceRecordsMarksInOrder() {
+    let trace = TimingTrace()
+    trace.mark("one")
+    trace.mark("two")
+
+    #expect(trace.marks.map(\.name) == ["one", "two"])
+}

@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: Swift tests and app package smoke
+    runs-on: macos-15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          swift --version
+
+      - name: Run tests
+        run: swift test
+
+      - name: Build app bundles
+        run: scripts/build-app.sh
+
+      - name: Package release assets smoke test
+        env:
+          LOCAL_WISPR_SKIP_BUILD: "1"
+          LOCAL_WISPR_RELEASE_VERSION: "0.0.0"
+        run: scripts/package-release.sh
+
+      - name: Upload package smoke artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalWispr-ci-package
+          path: dist/release/*
+          if-no-files-found: error

@@ -19,8 +19,13 @@ struct LlamaServerRewriteEngine: RewriteEngine {
 
         let endpoint = URL(string: configuredURL ?? "http://127.0.0.1:8080/completion")
             ?? URL(string: "http://127.0.0.1:8080/completion")!
+        let normalizedEndpoint = normalizedCompletionEndpoint(endpoint)
 
-        return LlamaServerRewriteEngine(endpoint: normalizedCompletionEndpoint(endpoint))
+        guard allowsEndpoint(normalizedEndpoint, environment: environment) else {
+            return nil
+        }
+
+        return LlamaServerRewriteEngine(endpoint: normalizedEndpoint)
     }
 
     func rewrite(_ transcript: Transcript) async throws -> CleanedText {
@@ -32,9 +37,10 @@ struct LlamaServerRewriteEngine: RewriteEngine {
             CompletionRequest(
                 prompt: CleanupPrompt.compact(for: transcript.text),
                 n_predict: Self.numPredict(for: transcript.text),
-                temperature: 0.1,
+                temperature: 0.0,
                 cache_prompt: true,
-                stream: false
+                stream: false,
+                stop: ["<|im_end|>", "<|endoftext|>"]
             )
         )
 
@@ -44,15 +50,51 @@ struct LlamaServerRewriteEngine: RewriteEngine {
         }
 
         let decoded = try JSONDecoder().decode(CompletionResponse.self, from: data)
-        let cleaned = decoded.content
-            .replacingOccurrences(of: #"<think>.*?</think>"#, with: "", options: [.regularExpression, .caseInsensitive])
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleaned = Self.polish(decoded.content)
 
         guard !cleaned.isEmpty else {
             throw LocalWisprError.cleanupFailed("llama.cpp server returned empty text")
         }
 
         return CleanedText(text: cleaned, engineName: name)
+    }
+
+    private static func polish(_ content: String) -> String {
+        var text = content
+            .replacingOccurrences(of: #"<think>.*?</think>"#, with: "", options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: "<|im_end|>", with: "")
+            .replacingOccurrences(of: "<|endoftext|>", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        text = text.replacingOccurrences(
+            of: #"(?is)^\s*(sure,?\s*)?(here'?s\s+(the\s+)?)?(final\s+)?(cleaned\s+)?(text|output)\s*:\s*"#,
+            with: "",
+            options: .regularExpression
+        )
+
+        text = text.replacingOccurrences(
+            of: #"(?i)(?<![\p{L}])(um+|uh+|erm+|ah+)(?![\p{L}])[,\s]*"#,
+            with: "",
+            options: .regularExpression
+        )
+
+        let replacements: [(String, String)] = [
+            (#"(?<![\p{L}])i(?![\p{L}])"#, "I"),
+            (#"(?i)(?<![\p{L}])john(?![\p{L}])"#, "John"),
+            (#"(?i)(?<![\p{L}])monday(?![\p{L}])"#, "Monday"),
+            (#"(?i)(?<![\p{L}])tuesday(?![\p{L}])"#, "Tuesday"),
+            (#"(?i)(?<![\p{L}])wednesday(?![\p{L}])"#, "Wednesday"),
+            (#"(?i)(?<![\p{L}])thursday(?![\p{L}])"#, "Thursday"),
+            (#"(?i)(?<![\p{L}])friday(?![\p{L}])"#, "Friday"),
+            (#"(?i)(?<![\p{L}])saturday(?![\p{L}])"#, "Saturday"),
+            (#"(?i)(?<![\p{L}])sunday(?![\p{L}])"#, "Sunday")
+        ]
+
+        for (pattern, replacement) in replacements {
+            text = text.replacingOccurrences(of: pattern, with: replacement, options: .regularExpression)
+        }
+
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func normalizedCompletionEndpoint(_ url: URL) -> URL {
@@ -64,13 +106,22 @@ struct LlamaServerRewriteEngine: RewriteEngine {
         return url
     }
 
+    private static func allowsEndpoint(_ url: URL, environment: [String: String]) -> Bool {
+        if environment["LOCAL_WISPR_ALLOW_NON_LOOPBACK_LLAMA"] == "1" {
+            return true
+        }
+
+        let host = (url.host ?? "").lowercased()
+        return ["127.0.0.1", "localhost", "::1"].contains(host)
+    }
+
     private static func numPredict(for transcript: String) -> Int {
         let environment = ProcessInfo.processInfo.environment
         if let override = environment["LOCAL_WISPR_CLEANUP_NUM_PREDICT"].flatMap(Int.init), override > 0 {
             return override
         }
 
-        return min(192, max(48, transcript.count / 3 + 32))
+        return min(192, max(38, transcript.count / 8 + 16))
     }
 }
 
@@ -80,6 +131,7 @@ private struct CompletionRequest: Encodable {
     let temperature: Double
     let cache_prompt: Bool
     let stream: Bool
+    let stop: [String]
 }
 
 private struct CompletionResponse: Decodable {

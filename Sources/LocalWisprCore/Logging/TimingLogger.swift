@@ -3,11 +3,17 @@ import Foundation
 final class TimingLogger {
     let logURL: URL
 
-    init(
-        logURL: URL = FileManager.default.homeDirectoryForCurrentUser
+    init(logURL: URL? = nil) {
+        self.logURL = logURL ?? Self.defaultLogURL()
+    }
+
+    private static func defaultLogURL() -> URL {
+        if let override = ProcessInfo.processInfo.environment["LOCAL_WISPR_TIMING_LOG"], !override.isEmpty {
+            return URL(fileURLWithPath: override).standardizedFileURL
+        }
+
+        return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/LocalWispr/mock-flow.log")
-    ) {
-        self.logURL = logURL
     }
 
     func write(

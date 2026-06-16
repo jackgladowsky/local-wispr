@@ -9,4 +9,10 @@ struct AudioRecording: Sendable, Equatable {
     var duration: TimeInterval {
         max(0, endedAt.timeIntervalSince(startedAt))
     }
+
+    func removeTemporaryFiles(fileManager: FileManager = .default) {
+        for url in [rawURL, wavURL] {
+            try? fileManager.removeItem(at: url)
+        }
+    }
 }

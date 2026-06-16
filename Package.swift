@@ -27,6 +27,10 @@ let package = Package(
             dependencies: ["LocalWisprCore"]
         ),
         .executableTarget(
+            name: "LocalWisprRewriteBench",
+            dependencies: ["LocalWisprCore"]
+        ),
+        .executableTarget(
             name: "LocalWisprPasteHelper",
             linkerSettings: [
                 .linkedFramework("AppKit"),

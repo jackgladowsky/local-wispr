@@ -36,7 +36,7 @@ Hotkey/input:     Carbon hotkey and/or event tap, wrapped behind HotkeyControlle
 Floating UI:      borderless NSPanel near top center of active display
 STT engine:       WhisperKit/Core ML first, benchmarked against whisper.cpp Metal
 Cleanup engine:   embedded local rewrite model via llama.cpp or MLX
-Dev adapter:      Ollama allowed only as a benchmark/prototype adapter
+Dev adapter:      benchmark adapters should use llama.cpp/local-only paths
 Insertion:        clipboard-preserving paste with Accessibility permission
 ```
 
@@ -45,7 +45,7 @@ Why this path:
 - Swift/AppKit gives the best chance of a polished, low-friction Mac utility.
 - WhisperKit is the cleanest native Apple Silicon STT starting point.
 - whisper.cpp with Metal should stay as the fallback if it benchmarks faster or more stable.
-- Ollama is convenient for testing, but it should not be the production dependency because it adds setup friction and less predictable startup behavior.
+- Avoid extra model daemons as product dependencies; use llama.cpp/local-only paths for cleanup experiments.
 - The cleanup model should stay warm in memory and run with a tight token budget.
 
 ## First Build Slice
@@ -333,7 +333,7 @@ Primary candidates to benchmark:
 Runtime recommendation:
 
 - Product path: embedded llama.cpp or MLX runtime.
-- Prototype-only path: Ollama adapter for quick comparison.
+- Prototype path: warmed llama.cpp server or local-only cleanup for quick comparison.
 
 Evaluation criteria:
 
@@ -622,6 +622,5 @@ These should be resolved by benchmark, not taste:
 - WhisperKit / Argmax OSS: https://github.com/argmaxinc/argmax-oss-swift
 - whisper.cpp: https://github.com/ggml-org/whisper.cpp
 - llama.cpp server/runtime: https://github.com/ggml-org/llama.cpp
-- Ollama API, prototype adapter only: https://docs.ollama.com/api
 - Apple macOS app sandboxing: https://developer.apple.com/documentation/xcode/configuring-the-macos-app-sandbox
 - Apple Human Interface Guidelines: https://developer.apple.com/design/human-interface-guidelines

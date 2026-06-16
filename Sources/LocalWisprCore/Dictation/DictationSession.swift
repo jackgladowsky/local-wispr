@@ -221,6 +221,8 @@ final class DictationSession {
     }
 
     private func process(context: SessionContext, recording: AudioRecording?, mode: ProcessingMode) async {
+        defer { recording?.removeTemporaryFiles() }
+
         let activeSTTEngine: STTEngine = mode == .mock ? mockSTTEngine : sttEngine
         let activeRewriteEngine: RewriteEngine = mode == .mock ? mockRewriteEngine : rewriteEngine
 

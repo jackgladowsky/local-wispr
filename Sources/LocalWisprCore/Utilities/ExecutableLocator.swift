@@ -14,7 +14,9 @@ enum ExecutableLocator {
     private static func absoluteCandidates(for executableName: String) -> [URL] {
         var paths = [
             "/opt/homebrew/bin/\(executableName)",
+            "/opt/homebrew/opt/llama.cpp/bin/\(executableName)",
             "/usr/local/bin/\(executableName)",
+            "/usr/local/opt/llama.cpp/bin/\(executableName)",
             "/usr/bin/\(executableName)",
             "/bin/\(executableName)"
         ]

@@ -12,6 +12,21 @@ HELPER_MACOS_DIR="$HELPER_CONTENTS_DIR/MacOS"
 HELPER_RESOURCES_DIR="$HELPER_CONTENTS_DIR/Resources"
 
 cd "$ROOT_DIR"
+
+stamp_plist_version() {
+    local plist="$1"
+
+    if [[ -n "${LOCAL_WISPR_VERSION:-}" ]]; then
+        /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${LOCAL_WISPR_VERSION}" "$plist" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string ${LOCAL_WISPR_VERSION}" "$plist"
+    fi
+
+    if [[ -n "${LOCAL_WISPR_BUILD_NUMBER:-}" ]]; then
+        /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${LOCAL_WISPR_BUILD_NUMBER}" "$plist" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${LOCAL_WISPR_BUILD_NUMBER}" "$plist"
+    fi
+}
+
 swift build -c release
 
 rm -rf "$APP_DIR" "$HELPER_APP_DIR"
@@ -20,10 +35,12 @@ mkdir -p "$HELPER_MACOS_DIR" "$HELPER_RESOURCES_DIR"
 
 cp "$ROOT_DIR/.build/release/LocalWispr" "$MACOS_DIR/LocalWispr"
 cp "$ROOT_DIR/Packaging/Info.plist" "$CONTENTS_DIR/Info.plist"
+stamp_plist_version "$CONTENTS_DIR/Info.plist"
 chmod +x "$MACOS_DIR/LocalWispr"
 
 cp "$ROOT_DIR/.build/release/LocalWisprPasteHelper" "$HELPER_MACOS_DIR/LocalWisprPasteHelper"
 cp "$ROOT_DIR/Packaging/PasteHelperInfo.plist" "$HELPER_CONTENTS_DIR/Info.plist"
+stamp_plist_version "$HELPER_CONTENTS_DIR/Info.plist"
 chmod +x "$HELPER_MACOS_DIR/LocalWisprPasteHelper"
 
 if command -v codesign >/dev/null 2>&1; then

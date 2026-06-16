@@ -63,7 +63,7 @@ struct WhisperCLIEngine: STTEngine {
         )
     }
 
-    private static func cleanedTranscript(from stdout: String) -> String {
+    static func cleanedTranscript(from stdout: String) -> String {
         stdout
             .split(whereSeparator: \.isNewline)
             .map(String.init)
