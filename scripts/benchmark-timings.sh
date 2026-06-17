@@ -4,13 +4,16 @@ set -euo pipefail
 LOG_PATH="$HOME/Library/Logs/LocalWispr/mock-flow.log"
 LAST=""
 CSV=0
+MODE_FILTERS=()
 
 usage() {
     cat <<'EOF'
-Usage: scripts/benchmark-timings.sh [--log PATH] [--last N] [--csv]
+Usage: scripts/benchmark-timings.sh [--log PATH] [--last N] [--mode MODE] [--csv]
 
 Summarize Local Wispr pipeline timings from the local timing log.
 Default log: ~/Library/Logs/LocalWispr/mock-flow.log
+
+Repeat --mode to compare a subset, e.g. --mode real or --mode real-streaming-experimental.
 EOF
 }
 
@@ -22,6 +25,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --last)
             LAST="${2:?missing count for --last}"
+            shift 2
+            ;;
+        --mode)
+            MODE_FILTERS+=("${2:?missing mode for --mode}")
             shift 2
             ;;
         --csv)
@@ -39,7 +46,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-python3 - "$LOG_PATH" "$LAST" "$CSV" <<'PY'
+MODE_FILTERS_JOINED=""
+if ((${#MODE_FILTERS[@]})); then
+    MODE_FILTERS_JOINED="$(IFS=,; echo "${MODE_FILTERS[*]}")"
+fi
+
+python3 - "$LOG_PATH" "$LAST" "$CSV" "$MODE_FILTERS_JOINED" <<'PY'
 import csv
 import math
 import pathlib
@@ -51,6 +63,7 @@ import sys
 log_path = pathlib.Path(sys.argv[1]).expanduser()
 last = int(sys.argv[2]) if sys.argv[2] else None
 csv_mode = sys.argv[3] == "1"
+mode_filters = {mode for mode in sys.argv[4].split(",") if mode}
 
 if not log_path.exists():
     print(f"Timing log not found: {log_path}", file=sys.stderr)
@@ -81,6 +94,9 @@ for line in log_path.read_text(errors="replace").splitlines():
         errors.append(row)
     elif "session" in row:
         rows.append(row)
+
+if mode_filters:
+    rows = [row for row in rows if row.get("mode", "unknown") in mode_filters]
 
 if last:
     rows = rows[-last:]
@@ -145,6 +161,8 @@ detailed_rows = [
 print(f"Successful sessions analyzed: {len(rows)}")
 print(f"Detailed stage sessions: {len(detailed_rows)}")
 print(f"Error sessions in log: {len(errors)}")
+if mode_filters:
+    print(f"Mode filter: {', '.join(sorted(mode_filters))}")
 if last:
     print(f"Window: last {last} successful sessions")
 print()

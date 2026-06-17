@@ -123,6 +123,32 @@ Without a running `llama-server`, Local Wispr uses Basic Local Cleanup instead o
 
 After changing engines or environment variables, choose **Reload Engines** from the Local Wispr menu or relaunch the app from the same environment.
 
+## Experimental Streaming STT
+
+Local Wispr includes an off-by-default streaming/speculative STT path for latency experiments. The normal batch recorder remains the default.
+
+```sh
+LOCAL_WISPR_EXPERIMENTAL_STREAMING=1 scripts/install-app.sh
+```
+
+When enabled, the app keeps the normal full-session recording for fallback while also chunking microphone audio. Finalized chunks are transcribed and lightly cleaned while you are still holding the hotkey. On release, Local Wispr assembles the ordered speculative transcript, then either runs a final cohesion cleanup or, for the fastest experimental path, skips final cleanup:
+
+```sh
+LOCAL_WISPR_EXPERIMENTAL_STREAMING=1 \
+LOCAL_WISPR_STREAMING_SKIP_FINAL_CLEANUP=1 \
+  scripts/install-app.sh
+```
+
+Tuning knobs:
+
+```sh
+LOCAL_WISPR_STREAMING_CHUNK_SECONDS=2.5
+LOCAL_WISPR_STREAMING_MIN_CHUNK_SECONDS=0.25
+LOCAL_WISPR_STREAMING_CHUNK_GRACE_SECONDS=2.0
+```
+
+Latest local timing evidence from `~/Library/Logs/LocalWispr/mock-flow.log`: experimental streaming improved average STT from about `238.7 ms` in recent main rows to about `191.1 ms`; the no-final-cleanup experimental path averaged about `187.1 ms` STT and `345.4 ms` release-to-output over the latest 5 rows. Treat this path as experimental until accuracy and longer-dictation coverage are stronger. See [`docs/streaming-stt-experiment.md`](docs/streaming-stt-experiment.md).
+
 ## Build and Install
 
 Build the Swift package:
@@ -206,6 +232,13 @@ Limit the summary to the most recent successful sessions:
 scripts/benchmark-timings.sh --last 20
 ```
 
+Compare default and experimental streaming modes:
+
+```sh
+scripts/benchmark-timings.sh --mode real --last 20
+scripts/benchmark-timings.sh --mode real-streaming-experimental --last 20
+```
+
 Export raw timing rows as CSV:
 
 ```sh
@@ -256,8 +289,9 @@ New timing logs include stage-level fields such as `hotkey_to_recording_ms`, `au
 LocalWispr.app
 ├─ AppDelegate / menu bar lifecycle
 ├─ HotkeyController          Carbon global hold hotkey
-├─ AudioCapture              AVFoundation microphone capture
+├─ AudioCapture              AVFoundation microphone capture, optional chunking
 ├─ DictationSession          recording → STT → cleanup → insertion orchestration
+├─ SpeculativeDictation      off-by-default chunk STT/cleanup experiment
 ├─ EngineRegistry            STT and rewrite engine selection
 ├─ InsertionController       clipboard-safe paste and fallback copy behavior
 ├─ Settings                  permissions, engine status, logs, model paths
@@ -274,6 +308,7 @@ Local Wispr is designed to run without cloud transcription or analytics.
 - Audio is captured locally and sent to local engines only.
 - The default Whisper model is stored under Application Support.
 - Timing/debug logs are written locally to `~/Library/Logs/LocalWispr/mock-flow.log`.
+- Temporary full-session and streaming chunk audio files are removed after processing/cancel/failure.
 - Cleanup uses Basic Local Cleanup by default, or an explicitly configured local `llama-server` loopback endpoint.
 - Setup scripts download open local model artifacts and Homebrew packages as needed.
 

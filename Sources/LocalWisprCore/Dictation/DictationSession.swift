@@ -13,6 +13,19 @@ final class DictationSession {
         let startedAt: Date
         let target: InsertionTarget?
         let trace: TimingTrace
+        let speculativeCoordinator: SpeculativeDictationCoordinator?
+
+        init(
+            startedAt: Date,
+            target: InsertionTarget?,
+            trace: TimingTrace,
+            speculativeCoordinator: SpeculativeDictationCoordinator? = nil
+        ) {
+            self.startedAt = startedAt
+            self.target = target
+            self.trace = trace
+            self.speculativeCoordinator = speculativeCoordinator
+        }
     }
 
     private let panelController: DictationPanelController
@@ -129,9 +142,19 @@ final class DictationSession {
     }
 
     func cancel() {
+        let speculativeCoordinator: SpeculativeDictationCoordinator?
+        if case .recording(let context) = state {
+            speculativeCoordinator = context.speculativeCoordinator
+        } else {
+            speculativeCoordinator = nil
+        }
+
         processingTask?.cancel()
         processingTask = nil
         audioCapture.cancel()
+        Task {
+            await speculativeCoordinator?.cancel()
+        }
         state = .idle
 
         panelController.show(
@@ -167,8 +190,34 @@ final class DictationSession {
         guard case .preparing(let currentTrace) = state, currentTrace.id == trace.id else { return }
 
         do {
+            let recordingStartedAt = Date()
+            let speculativeConfiguration = SpeculativeDictationConfiguration.isEnabledFromEnvironment
+                ? SpeculativeDictationConfiguration.fromEnvironment()
+                : nil
+            let speculativeCoordinator = speculativeConfiguration.map {
+                SpeculativeDictationCoordinator(
+                    sttEngine: sttEngine,
+                    rewriteEngine: rewriteEngine,
+                    startedAt: recordingStartedAt,
+                    configuration: $0
+                )
+            }
+
             trace.mark("audio_start_begin")
-            try audioCapture.start()
+            let onChunkFinalized: (@Sendable (AudioChunk) -> Void)?
+            if let speculativeCoordinator {
+                onChunkFinalized = { chunk in
+                    Task {
+                        await speculativeCoordinator.accept(chunk)
+                    }
+                }
+            } else {
+                onChunkFinalized = nil
+            }
+            try audioCapture.start(
+                chunking: speculativeConfiguration?.audioChunkingConfiguration,
+                onChunkFinalized: onChunkFinalized
+            )
             trace.mark("audio_start_end")
             trace.mark("record_start")
 
@@ -177,9 +226,10 @@ final class DictationSession {
             trace.mark("target_capture_end")
 
             let context = SessionContext(
-                startedAt: Date(),
+                startedAt: recordingStartedAt,
                 target: target,
-                trace: trace
+                trace: trace,
+                speculativeCoordinator: speculativeCoordinator
             )
 
             state = .recording(context)
@@ -187,7 +237,7 @@ final class DictationSession {
                 .init(
                     phase: .listening,
                     title: "Listening",
-                    subtitle: "Release to insert",
+                    subtitle: speculativeCoordinator == nil ? "Release to insert" : "Streaming prototype enabled",
                     showsSpinner: false
                 )
             )
@@ -227,6 +277,40 @@ final class DictationSession {
         let activeRewriteEngine: RewriteEngine = mode == .mock ? mockRewriteEngine : rewriteEngine
 
         do {
+            if
+                mode == .real,
+                let recording,
+                let speculativeCoordinator = context.speculativeCoordinator
+            {
+                do {
+                    let (transcript, cleaned) = try await runSpeculativePipeline(
+                        context: context,
+                        recording: recording,
+                        coordinator: speculativeCoordinator,
+                        sttEngine: activeSTTEngine,
+                        rewriteEngine: activeRewriteEngine
+                    )
+                    try Task.checkCancellation()
+                    await insertAndLog(
+                        context: context,
+                        recording: recording,
+                        modeLogValue: "real-streaming-experimental",
+                        sttEngineName: activeSTTEngine.name,
+                        rewriteEngineName: activeRewriteEngine.name,
+                        transcript: transcript,
+                        cleaned: cleaned
+                    )
+                    return
+                } catch is CancellationError {
+                    await speculativeCoordinator.cancel()
+                    throw CancellationError()
+                } catch {
+                    await speculativeCoordinator.cancel()
+                    context.trace.mark("streaming_fallback")
+                    NSLog("LocalWispr streaming prototype failed; falling back to batch: \(error.localizedDescription)")
+                }
+            }
+
             panelController.show(
                 .init(
                     phase: .transcribing,
@@ -263,29 +347,15 @@ final class DictationSession {
             try Task.checkCancellation()
             context.trace.mark("rewrite_final")
 
-            context.trace.mark("insert_start")
-            let insertionResult = await insertionController.insert(cleaned.text, target: context.target)
-            context.trace.mark("output_final")
-
-            let snapshot = PanelSnapshot(
-                phase: insertionResult.outcome == .pasted ? .inserted : .copied,
-                title: insertionResult.outcome == .pasted ? "Inserted" : "Copied",
-                subtitle: insertionResult.detail,
-                showsSpinner: false
-            )
-
-            panelController.show(snapshot, autoHideAfter: 1.4)
-            logger.write(
-                context.trace,
-                insertionResult: insertionResult,
-                mode: mode.logValue,
+            await insertAndLog(
+                context: context,
                 recording: recording,
+                modeLogValue: mode.logValue,
                 sttEngineName: activeSTTEngine.name,
                 rewriteEngineName: activeRewriteEngine.name,
                 transcript: transcript,
                 cleaned: cleaned
             )
-            state = .idle
         } catch is CancellationError {
             state = .idle
         } catch {
@@ -308,5 +378,112 @@ final class DictationSession {
             )
             state = .idle
         }
+    }
+
+    private func runSpeculativePipeline(
+        context: SessionContext,
+        recording: AudioRecording,
+        coordinator: SpeculativeDictationCoordinator,
+        sttEngine: STTEngine,
+        rewriteEngine: RewriteEngine
+    ) async throws -> (Transcript, CleanedText) {
+        panelController.show(
+            .init(
+                phase: .transcribing,
+                title: "Finalizing tail",
+                subtitle: "Experimental streaming STT",
+                showsSpinner: true
+            )
+        )
+
+        guard let expectedStreamingChunkCount = recording.expectedStreamingChunkCount else {
+            throw LocalWisprError.cleanupFailed(
+                "Streaming prototype did not receive a complete chunking summary; falling back to batch"
+            )
+        }
+
+        context.trace.mark("stt_start")
+        let draft = try await coordinator.finish(
+            finalChunks: recording.chunks,
+            expectedChunkCount: expectedStreamingChunkCount
+        )
+        try Task.checkCancellation()
+        context.trace.mark("stt_final")
+
+        if Self.shouldSkipFinalSpeculativeCleanup {
+            context.trace.mark("rewrite_start")
+            let text = draft.cohesionTranscript.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else {
+                throw LocalWisprError.emptyTranscript
+            }
+            context.trace.mark("rewrite_final")
+
+            return (
+                draft.transcript,
+                CleanedText(text: text, engineName: "Speculative chunks, no final cleanup")
+            )
+        }
+
+        panelController.show(
+            .init(
+                phase: .polishing,
+                title: "Cohesion pass",
+                subtitle: rewriteEngine.name,
+                showsSpinner: true
+            )
+        )
+
+        context.trace.mark("rewrite_start")
+        let cohesion = try await rewriteEngine.rewrite(draft.cohesionTranscript)
+        try Task.checkCancellation()
+        context.trace.mark("rewrite_final")
+
+        let engineName = cohesion.engineName.map { "Speculative chunks + \($0)" }
+            ?? "Speculative chunks + \(rewriteEngine.name)"
+        return (
+            draft.transcript,
+            CleanedText(text: cohesion.text, engineName: engineName)
+        )
+    }
+
+    private static var shouldSkipFinalSpeculativeCleanup: Bool {
+        let value = ProcessInfo.processInfo.environment["LOCAL_WISPR_STREAMING_SKIP_FINAL_CLEANUP"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return value == "1" || value == "true" || value == "yes" || value == "on"
+    }
+
+    private func insertAndLog(
+        context: SessionContext,
+        recording: AudioRecording?,
+        modeLogValue: String,
+        sttEngineName: String,
+        rewriteEngineName: String,
+        transcript: Transcript,
+        cleaned: CleanedText
+    ) async {
+        context.trace.mark("insert_start")
+        let insertionResult = await insertionController.insert(cleaned.text, target: context.target)
+        context.trace.mark("output_final")
+
+        let snapshot = PanelSnapshot(
+            phase: insertionResult.outcome == .pasted ? .inserted : .copied,
+            title: insertionResult.outcome == .pasted ? "Inserted" : "Copied",
+            subtitle: insertionResult.detail,
+            showsSpinner: false
+        )
+
+        panelController.show(snapshot, autoHideAfter: 1.4)
+        logger.write(
+            context.trace,
+            insertionResult: insertionResult,
+            mode: modeLogValue,
+            recording: recording,
+            sttEngineName: sttEngineName,
+            rewriteEngineName: rewriteEngineName,
+            transcript: transcript,
+            cleaned: cleaned
+        )
+        state = .idle
     }
 }
