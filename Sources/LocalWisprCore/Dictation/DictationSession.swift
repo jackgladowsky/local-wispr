@@ -117,9 +117,12 @@ final class DictationSession {
         state = .processing
 
         let recording: AudioRecording
+        let fullSessionWavConversion: FullSessionWavConversion = context.speculativeCoordinator != nil && Self.shouldDeferStreamingFallbackAudio
+            ? .deferred
+            : .synchronous
         do {
             context.trace.mark("audio_stop_begin")
-            recording = try audioCapture.stop()
+            recording = try audioCapture.stop(fullSessionWavConversion: fullSessionWavConversion)
             context.trace.mark("audio_stop_end")
         } catch {
             state = .idle
@@ -237,7 +240,7 @@ final class DictationSession {
                 .init(
                     phase: .listening,
                     title: "Listening",
-                    subtitle: speculativeCoordinator == nil ? "Release to insert" : "Streaming prototype enabled",
+                    subtitle: speculativeCoordinator == nil ? "Release to insert" : "Streaming locally",
                     showsSpinner: false
                 )
             )
@@ -294,7 +297,7 @@ final class DictationSession {
                     await insertAndLog(
                         context: context,
                         recording: recording,
-                        modeLogValue: "real-streaming-experimental",
+                        modeLogValue: "real-streaming",
                         sttEngineName: activeSTTEngine.name,
                         rewriteEngineName: activeRewriteEngine.name,
                         transcript: transcript,
@@ -307,7 +310,7 @@ final class DictationSession {
                 } catch {
                     await speculativeCoordinator.cancel()
                     context.trace.mark("streaming_fallback")
-                    NSLog("LocalWispr streaming prototype failed; falling back to batch: \(error.localizedDescription)")
+                    NSLog("LocalWispr streaming STT failed; falling back to batch: \(error.localizedDescription)")
                 }
             }
 
@@ -320,11 +323,12 @@ final class DictationSession {
                 )
             )
 
+            let audioURL = try await recording?.whisperReadyWavURL()
             let request = TranscriptionRequest(
                 startedAt: context.startedAt,
                 endedAt: recording?.endedAt ?? Date(),
                 source: mode == .mock ? .mock : .microphone,
-                audioURL: recording?.wavURL,
+                audioURL: audioURL,
                 duration: recording?.duration ?? max(0.1, Date().timeIntervalSince(context.startedAt))
             )
 
@@ -391,14 +395,14 @@ final class DictationSession {
             .init(
                 phase: .transcribing,
                 title: "Finalizing tail",
-                subtitle: "Experimental streaming STT",
+                subtitle: "Streaming STT",
                 showsSpinner: true
             )
         )
 
         guard let expectedStreamingChunkCount = recording.expectedStreamingChunkCount else {
             throw LocalWisprError.cleanupFailed(
-                "Streaming prototype did not receive a complete chunking summary; falling back to batch"
+                "Streaming STT did not receive a complete chunking summary; falling back to batch"
             )
         }
 
@@ -447,10 +451,22 @@ final class DictationSession {
     }
 
     private static var shouldSkipFinalSpeculativeCleanup: Bool {
-        let value = ProcessInfo.processInfo.environment["LOCAL_WISPR_STREAMING_SKIP_FINAL_CLEANUP"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        return value == "1" || value == "true" || value == "yes" || value == "on"
+        isEnabledEnvironmentFlag("LOCAL_WISPR_STREAMING_SKIP_FINAL_CLEANUP", default: true)
+    }
+
+    private static var shouldDeferStreamingFallbackAudio: Bool {
+        isEnabledEnvironmentFlag("LOCAL_WISPR_STREAMING_DEFER_FULL_WAV", default: true)
+    }
+
+    private static func isEnabledEnvironmentFlag(_ name: String, default defaultValue: Bool = false) -> Bool {
+        switch ProcessInfo.processInfo.environment[name]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "1", "true", "yes", "on":
+            true
+        case "0", "false", "no", "off":
+            false
+        default:
+            defaultValue
+        }
     }
 
     private func insertAndLog(

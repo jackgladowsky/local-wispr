@@ -1,6 +1,11 @@
 import AVFoundation
 import Foundation
 
+enum FullSessionWavConversion: Sendable, Equatable {
+    case synchronous
+    case deferred
+}
+
 final class AudioCapture: @unchecked Sendable {
     private let engine = AVAudioEngine()
     private let lock = NSLock()
@@ -99,7 +104,7 @@ final class AudioCapture: @unchecked Sendable {
         }
     }
 
-    func stop() throws -> AudioRecording {
+    func stop(fullSessionWavConversion: FullSessionWavConversion = .synchronous) throws -> AudioRecording {
         let endedAt = Date()
 
         guard engine.isRunning || audioFile != nil else {
@@ -130,11 +135,19 @@ final class AudioCapture: @unchecked Sendable {
         }
 
         let wavURL = rawURL.deletingPathExtension().appendingPathExtension("wav")
-        do {
-            try Self.convertToWhisperReadyWav(rawURL: rawURL, wavURL: wavURL)
-        } catch {
-            Self.removeFiles([rawURL, wavURL])
-            throw error
+        let fullSessionWavAvailability: AudioRecording.FullSessionWavAvailability
+        switch fullSessionWavConversion {
+        case .synchronous:
+            do {
+                try AudioFileConverter.convertToWhisperReadyWav(rawURL: rawURL, wavURL: wavURL)
+            } catch {
+                let chunkURLs = state.pendingChunks.flatMap { [$0.rawURL, $0.wavURL] }
+                Self.removeFiles([rawURL, wavURL] + chunkURLs)
+                throw error
+            }
+            fullSessionWavAvailability = .ready
+        case .deferred:
+            fullSessionWavAvailability = .deferred
         }
 
         let chunks = state.pendingChunks.compactMap { pendingChunk in
@@ -153,7 +166,8 @@ final class AudioCapture: @unchecked Sendable {
             startedAt: startedAt,
             endedAt: endedAt,
             chunks: chunks,
-            expectedStreamingChunkCount: state.expectedStreamingChunkCount
+            expectedStreamingChunkCount: state.expectedStreamingChunkCount,
+            fullSessionWavAvailability: fullSessionWavAvailability
         )
     }
 
@@ -219,8 +233,20 @@ final class AudioCapture: @unchecked Sendable {
 
     private static func convertPendingChunk(_ pendingChunk: PendingAudioChunk) throws -> AudioChunk {
         let wavURL = pendingChunk.wavURL
+        guard pendingChunk.shouldTranscribe else {
+            return AudioChunk(
+                index: pendingChunk.index,
+                rawURL: pendingChunk.rawURL,
+                wavURL: wavURL,
+                startedAt: pendingChunk.startedAt,
+                endedAt: pendingChunk.endedAt,
+                shouldTranscribe: false,
+                detectedSpeech: pendingChunk.detectedSpeech
+            )
+        }
+
         do {
-            try convertToWhisperReadyWav(rawURL: pendingChunk.rawURL, wavURL: wavURL)
+            try AudioFileConverter.convertToWhisperReadyWav(rawURL: pendingChunk.rawURL, wavURL: wavURL)
         } catch {
             removeFiles([pendingChunk.rawURL, wavURL])
             throw error
@@ -231,7 +257,8 @@ final class AudioCapture: @unchecked Sendable {
             rawURL: pendingChunk.rawURL,
             wavURL: wavURL,
             startedAt: pendingChunk.startedAt,
-            endedAt: pendingChunk.endedAt
+            endedAt: pendingChunk.endedAt,
+            detectedSpeech: pendingChunk.detectedSpeech
         )
     }
 
@@ -246,29 +273,6 @@ final class AudioCapture: @unchecked Sendable {
             .appendingPathComponent("LocalWispr/Recordings", isDirectory: true)
     }
 
-    private static func convertToWhisperReadyWav(rawURL: URL, wavURL: URL) throws {
-        let afconvert = URL(fileURLWithPath: "/usr/bin/afconvert")
-
-        guard FileManager.default.isExecutableFile(atPath: afconvert.path) else {
-            throw LocalWisprError.audioConversionFailed("afconvert is unavailable")
-        }
-
-        let result = try ProcessRunner.runSync(
-            executableURL: afconvert,
-            arguments: [
-                rawURL.path,
-                wavURL.path,
-                "-f", "WAVE",
-                "-d", "LEI16@16000",
-                "-c", "1"
-            ],
-            timeout: 10
-        )
-
-        guard result.status == 0 else {
-            throw LocalWisprError.audioConversionFailed(result.stderr)
-        }
-    }
 }
 
 private struct PendingAudioChunk: Sendable, Equatable {
@@ -276,6 +280,8 @@ private struct PendingAudioChunk: Sendable, Equatable {
     let rawURL: URL
     let startedAt: Date
     let endedAt: Date
+    let shouldTranscribe: Bool
+    let detectedSpeech: Bool?
 
     var wavURL: URL {
         rawURL.deletingPathExtension().appendingPathExtension("wav")
@@ -291,7 +297,8 @@ private final class AudioChunkWriter {
     private let directory: URL
     private let sessionID: String
     private let inputFormat: AVAudioFormat
-    private let targetFrameCount: AVAudioFramePosition
+    private let configuration: AudioChunkingConfiguration
+    private var boundaryScheduler: AudioChunkBoundaryScheduler
 
     private var currentFile: AVAudioFile?
     private var currentRawURL: URL?
@@ -309,11 +316,12 @@ private final class AudioChunkWriter {
         self.directory = directory
         self.sessionID = sessionID
         self.inputFormat = inputFormat
-        self.currentStartedAt = startedAt
-        self.targetFrameCount = max(
-            1,
-            AVAudioFramePosition(configuration.chunkDuration * inputFormat.sampleRate)
+        self.configuration = configuration
+        self.boundaryScheduler = AudioChunkBoundaryScheduler(
+            configuration: configuration,
+            sampleRate: inputFormat.sampleRate
         )
+        self.currentStartedAt = startedAt
 
         try startNewChunk(index: 0)
     }
@@ -328,7 +336,11 @@ private final class AudioChunkWriter {
         try currentFile?.write(from: buffer)
         currentFrameCount += AVAudioFramePosition(buffer.frameLength)
 
-        guard currentFrameCount >= targetFrameCount else { return [] }
+        let decision = boundaryScheduler.record(
+            frameCount: Int64(buffer.frameLength),
+            rms: configuration.adaptiveChunking == nil ? nil : Self.rootMeanSquareEnergy(of: buffer)
+        )
+        guard decision.shouldRotate else { return [] }
         return [try rotate(endedAt: estimatedEndDate(fallback: receivedAt))]
     }
 
@@ -345,11 +357,14 @@ private final class AudioChunkWriter {
             return AudioChunkWriterFinish(pendingChunks: [], expectedChunkCount: currentIndex)
         }
 
+        let detectedSpeech = boundaryScheduler.detectedSpeech
         let pendingChunk = PendingAudioChunk(
             index: currentIndex,
             rawURL: currentRawURL,
             startedAt: currentStartedAt,
-            endedAt: maxDate(estimatedEndDate(fallback: endedAt), currentStartedAt)
+            endedAt: maxDate(estimatedEndDate(fallback: endedAt), currentStartedAt),
+            shouldTranscribe: shouldTranscribe(detectedSpeech: detectedSpeech),
+            detectedSpeech: detectedSpeech
         )
         self.currentRawURL = nil
 
@@ -366,20 +381,72 @@ private final class AudioChunkWriter {
             throw LocalWisprError.audioConversionFailed("missing streaming chunk file")
         }
 
+        let detectedSpeech = boundaryScheduler.detectedSpeech
         let pendingChunk = PendingAudioChunk(
             index: currentIndex,
             rawURL: currentRawURL,
             startedAt: currentStartedAt,
-            endedAt: maxDate(endedAt, currentStartedAt)
+            endedAt: maxDate(endedAt, currentStartedAt),
+            shouldTranscribe: shouldTranscribe(detectedSpeech: detectedSpeech),
+            detectedSpeech: detectedSpeech
         )
 
         currentIndex += 1
         currentStartedAt = pendingChunk.endedAt
         currentFrameCount = 0
+        boundaryScheduler.reset()
         self.currentRawURL = nil
         try startNewChunk(index: currentIndex)
 
         return pendingChunk
+    }
+
+    private func shouldTranscribe(detectedSpeech: Bool?) -> Bool {
+        guard configuration.adaptiveChunking?.dropsSilentChunks == true else { return true }
+        return detectedSpeech != false
+    }
+
+    private static func rootMeanSquareEnergy(of buffer: AVAudioPCMBuffer) -> Float? {
+        let frameCount = Int(buffer.frameLength)
+        guard frameCount > 0 else { return nil }
+
+        let channelCount = Int(buffer.format.channelCount)
+        guard channelCount > 0 else { return nil }
+
+        let bufferCount = buffer.format.isInterleaved ? 1 : channelCount
+        let samplesPerBuffer = frameCount * (buffer.format.isInterleaved ? channelCount : 1)
+
+        if let channelData = buffer.floatChannelData {
+            var sumOfSquares = 0.0
+            var sampleCount = 0
+            for channel in 0..<bufferCount {
+                let samples = channelData[channel]
+                for frame in 0..<samplesPerBuffer {
+                    let sample = Double(samples[frame])
+                    sumOfSquares += sample * sample
+                }
+                sampleCount += samplesPerBuffer
+            }
+            guard sampleCount > 0 else { return nil }
+            return Float((sumOfSquares / Double(sampleCount)).squareRoot())
+        }
+
+        if let channelData = buffer.int16ChannelData {
+            var sumOfSquares = 0.0
+            var sampleCount = 0
+            for channel in 0..<bufferCount {
+                let samples = channelData[channel]
+                for frame in 0..<samplesPerBuffer {
+                    let sample = Double(samples[frame]) / Double(Int16.max)
+                    sumOfSquares += sample * sample
+                }
+                sampleCount += samplesPerBuffer
+            }
+            guard sampleCount > 0 else { return nil }
+            return Float((sumOfSquares / Double(sampleCount)).squareRoot())
+        }
+
+        return nil
     }
 
     private func startNewChunk(index: Int) throws {

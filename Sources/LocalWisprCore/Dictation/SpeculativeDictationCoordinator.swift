@@ -4,38 +4,70 @@ struct SpeculativeDictationConfiguration: Sendable, Equatable {
     let chunkDuration: TimeInterval
     let minimumChunkDuration: TimeInterval
     let chunkArrivalGrace: TimeInterval
+    let adaptiveChunking: AdaptiveAudioChunkingConfiguration?
 
     init(
         chunkDuration: TimeInterval = 2.5,
         minimumChunkDuration: TimeInterval = 0.25,
-        chunkArrivalGrace: TimeInterval = 2.0
+        chunkArrivalGrace: TimeInterval = 2.0,
+        adaptiveChunking: AdaptiveAudioChunkingConfiguration? = nil
     ) {
         self.chunkDuration = max(0.5, chunkDuration)
         self.minimumChunkDuration = max(0, minimumChunkDuration)
         self.chunkArrivalGrace = max(0, chunkArrivalGrace)
+        self.adaptiveChunking = adaptiveChunking
     }
 
     var audioChunkingConfiguration: AudioChunkingConfiguration {
         AudioChunkingConfiguration(
             chunkDuration: chunkDuration,
-            minimumChunkDuration: minimumChunkDuration
+            minimumChunkDuration: minimumChunkDuration,
+            adaptiveChunking: adaptiveChunking
         )
     }
 
     static var isEnabledFromEnvironment: Bool {
-        let value = ProcessInfo.processInfo.environment["LOCAL_WISPR_EXPERIMENTAL_STREAMING"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        return value == "1" || value == "true" || value == "yes" || value == "on"
+        let environment = ProcessInfo.processInfo.environment
+        if environmentFlag("LOCAL_WISPR_DISABLE_STREAMING", in: environment) {
+            return false
+        }
+
+        return environmentFlag("LOCAL_WISPR_EXPERIMENTAL_STREAMING", in: environment, default: true)
     }
 
     static func fromEnvironment() -> SpeculativeDictationConfiguration {
         let environment = ProcessInfo.processInfo.environment
+        let adaptiveChunking: AdaptiveAudioChunkingConfiguration? = environmentFlag(
+            "LOCAL_WISPR_STREAMING_ADAPTIVE_CHUNKS",
+            in: environment,
+            default: true
+        ) ? AdaptiveAudioChunkingConfiguration(
+            trailingSilenceDuration: environment["LOCAL_WISPR_STREAMING_SILENCE_SECONDS"].flatMap(TimeInterval.init) ?? 0.35,
+            speechRMS: environment["LOCAL_WISPR_STREAMING_SPEECH_RMS"].flatMap(Float.init) ?? 0.012,
+            dropsSilentChunks: environmentFlag("LOCAL_WISPR_STREAMING_DROP_SILENT_CHUNKS", in: environment)
+        ) : nil
+
         return SpeculativeDictationConfiguration(
             chunkDuration: environment["LOCAL_WISPR_STREAMING_CHUNK_SECONDS"].flatMap(TimeInterval.init) ?? 2.5,
             minimumChunkDuration: environment["LOCAL_WISPR_STREAMING_MIN_CHUNK_SECONDS"].flatMap(TimeInterval.init) ?? 0.25,
-            chunkArrivalGrace: environment["LOCAL_WISPR_STREAMING_CHUNK_GRACE_SECONDS"].flatMap(TimeInterval.init) ?? 2.0
+            chunkArrivalGrace: environment["LOCAL_WISPR_STREAMING_CHUNK_GRACE_SECONDS"].flatMap(TimeInterval.init) ?? 2.0,
+            adaptiveChunking: adaptiveChunking
         )
+    }
+
+    private static func environmentFlag(
+        _ name: String,
+        in environment: [String: String],
+        default defaultValue: Bool = false
+    ) -> Bool {
+        switch environment[name]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "1", "true", "yes", "on":
+            true
+        case "0", "false", "no", "off":
+            false
+        default:
+            defaultValue
+        }
     }
 }
 
@@ -138,6 +170,12 @@ actor SpeculativeDictationCoordinator {
             return
         }
 
+        guard chunk.shouldTranscribe else {
+            skippedChunkIndices.insert(chunk.index)
+            chunk.removeTemporaryFiles()
+            return
+        }
+
         guard chunk.duration >= configuration.minimumChunkDuration else {
             skippedChunkIndices.insert(chunk.index)
             chunk.removeTemporaryFiles()
@@ -165,7 +203,7 @@ actor SpeculativeDictationCoordinator {
         while !hasAcceptedAllChunks(upTo: expectedChunkCount) {
             if Date() >= deadline {
                 throw LocalWisprError.cleanupFailed(
-                    "Streaming prototype missed an audio chunk before release; falling back to batch"
+                    "Streaming STT missed an audio chunk before release; falling back to batch"
                 )
             }
 

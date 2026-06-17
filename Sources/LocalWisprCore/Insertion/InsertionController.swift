@@ -24,8 +24,10 @@ struct InsertionResult: Equatable {
 
 @MainActor
 final class InsertionController {
-    private enum PasteboardConstants {
-        static let pasteDelay: Duration = .milliseconds(100)
+    private let optionsProvider: () -> InsertionLatencyOptions
+
+    init(optionsProvider: @escaping () -> InsertionLatencyOptions = { InsertionLatencyOptions.current() }) {
+        self.optionsProvider = optionsProvider
     }
 
     func captureTarget() -> InsertionTarget? {
@@ -42,7 +44,19 @@ final class InsertionController {
     }
 
     func insert(_ text: String, target: InsertionTarget?) async -> InsertionResult {
-        let snapshot = PasteboardSnapshot.capture()
+        let options = optionsProvider()
+
+        guard isStillFocusedOnTarget(target) else {
+            copyToPasteboard(text)
+            return .init(
+                outcome: .copied,
+                detail: "Focus changed — press ⌘V to paste manually",
+                restoredClipboard: false
+            )
+        }
+
+        let shouldRestoreClipboard = !options.skipsClipboardRestore
+        let snapshot: PasteboardSnapshot? = shouldRestoreClipboard ? PasteboardSnapshot.capture() : nil
         copyToPasteboard(text)
 
         guard isStillFocusedOnTarget(target) else {
@@ -53,8 +67,7 @@ final class InsertionController {
             )
         }
 
-        let pasteboard = NSPasteboard.general
-        let temporaryChangeCount = pasteboard.changeCount
+        let temporaryChangeCount: Int? = shouldRestoreClipboard ? NSPasteboard.general.changeCount : nil
 
         if Self.isAccessibilityTrusted {
             if isSecureTargetCurrentFocus() {
@@ -96,7 +109,18 @@ final class InsertionController {
                 )
             }
         }
-        try? await Task.sleep(for: PasteboardConstants.pasteDelay)
+
+        guard let snapshot, let temporaryChangeCount else {
+            return .init(
+                outcome: .pasted,
+                detail: "Inserted — unsafe fast mode kept dictated text on clipboard",
+                restoredClipboard: false
+            )
+        }
+
+        if options.pasteRestoreDelayMilliseconds > 0 {
+            try? await Task.sleep(for: options.pasteRestoreDelay)
+        }
 
         let restored = restorePreviousClipboardIfStillTemporary(
             snapshot,

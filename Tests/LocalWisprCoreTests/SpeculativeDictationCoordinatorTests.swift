@@ -59,6 +59,44 @@ func speculativeCoordinatorSkipsTinyChunksAndRemovesTemporaryFiles() async throw
     #expect(!FileManager.default.fileExists(atPath: chunk.wavURL.path))
 }
 
+@Test
+func speculativeCoordinatorSkipsNonTranscribableChunksAndRemovesTemporaryFiles() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let chunk = try makeChunk(
+        in: directory,
+        index: 0,
+        text: "silent",
+        shouldTranscribe: false,
+        detectedSpeech: false
+    )
+    let coordinator = SpeculativeDictationCoordinator(
+        sttEngine: StubSTTEngine(),
+        rewriteEngine: StubRewriteEngine(),
+        startedAt: chunk.startedAt,
+        configuration: SpeculativeDictationConfiguration(
+            chunkDuration: 1,
+            minimumChunkDuration: 0.01,
+            chunkArrivalGrace: 0.01,
+            adaptiveChunking: AdaptiveAudioChunkingConfiguration(dropsSilentChunks: true)
+        )
+    )
+
+    await coordinator.accept(chunk)
+
+    var threwEmptyTranscript = false
+    do {
+        _ = try await coordinator.finish(finalChunks: [], expectedChunkCount: 1)
+    } catch LocalWisprError.emptyTranscript {
+        threwEmptyTranscript = true
+    }
+
+    #expect(threwEmptyTranscript)
+    #expect(!FileManager.default.fileExists(atPath: chunk.rawURL.path))
+    #expect(!FileManager.default.fileExists(atPath: chunk.wavURL.path))
+}
+
 private struct StubSTTEngine: STTEngine {
     let name = "Stub STT"
 
@@ -92,7 +130,9 @@ private func makeChunk(
     in directory: URL,
     index: Int,
     text: String,
-    duration: TimeInterval = 1
+    duration: TimeInterval = 1,
+    shouldTranscribe: Bool = true,
+    detectedSpeech: Bool? = nil
 ) throws -> AudioChunk {
     let rawURL = directory.appendingPathComponent("chunk-\(index)-\(text).caf")
     let wavURL = directory.appendingPathComponent("chunk-\(index)-\(text).wav")
@@ -104,6 +144,8 @@ private func makeChunk(
         rawURL: rawURL,
         wavURL: wavURL,
         startedAt: startedAt,
-        endedAt: startedAt.addingTimeInterval(duration)
+        endedAt: startedAt.addingTimeInterval(duration),
+        shouldTranscribe: shouldTranscribe,
+        detectedSpeech: detectedSpeech
     )
 }

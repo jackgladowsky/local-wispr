@@ -3,6 +3,21 @@ import Foundation
 // Cross-process paste notification consumed by the stable paste helper app.
 private let pasteHelperPasteNotification = Notification.Name("dev.local-wispr.PasteHelper.paste")
 
+private actor ResidentPasteHelperLaunchCache {
+    private var launchedPath: String?
+
+    func shouldLaunch(path: String) -> Bool {
+        guard launchedPath != path else { return false }
+        launchedPath = path
+        return true
+    }
+
+    func reset(path: String) {
+        guard launchedPath == path else { return }
+        launchedPath = nil
+    }
+}
+
 enum PasteHelperController {
     enum Status: Equatable {
         case checking
@@ -41,6 +56,8 @@ enum PasteHelperController {
 
     static let bundleIdentifier = "dev.local-wispr.PasteHelper"
     private static let appName = "Local Wispr Paste Helper.app"
+    private static let residentLaunchCache = ResidentPasteHelperLaunchCache()
+    private static let responseFilePollInterval: Duration = .milliseconds(5)
 
     static var appURL: URL? {
         candidateAppURLs.first { FileManager.default.fileExists(atPath: $0.path) }
@@ -68,19 +85,21 @@ enum PasteHelperController {
     }
 
     static func startResidentIfInstalled() async {
-        guard let appURL, supportsResidentPaste else { return }
-        await openHelper(appURL: appURL, arguments: [], wait: false)
+        guard let appURL, supportsResidentPaste(appURL: appURL) else { return }
+        await startResident(appURL: appURL)
     }
 
     static func paste() async -> PasteResult {
-        guard appURL != nil else { return .notInstalled }
+        guard let appURL else { return .notInstalled }
 
-        if supportsResidentPaste {
-            await startResidentIfInstalled()
+        if supportsResidentPaste(appURL: appURL) {
+            await startResident(appURL: appURL)
 
             if let response = await requestResidentPaste(responseTimeout: 0.35) {
                 return pasteResult(for: response)
             }
+
+            await residentLaunchCache.reset(path: appURL.standardizedFileURL.path)
         }
 
         switch await runHelper(arguments: ["--paste"], responseTimeout: 1.5) {
@@ -95,8 +114,17 @@ enum PasteHelperController {
         }
     }
 
-    private static var supportsResidentPaste: Bool {
-        guard let appURL else { return false }
+    private static func startResident(appURL: URL) async {
+        let appPath = appURL.standardizedFileURL.path
+        guard await residentLaunchCache.shouldLaunch(path: appPath) else { return }
+
+        let launched = await openHelper(appURL: appURL, arguments: [], wait: false)
+        if !launched {
+            await residentLaunchCache.reset(path: appPath)
+        }
+    }
+
+    private static func supportsResidentPaste(appURL: URL) -> Bool {
         let infoURL = appURL
             .appendingPathComponent("Contents")
             .appendingPathComponent("Info.plist")
@@ -177,7 +205,7 @@ enum PasteHelperController {
         guard let appURL else { return nil }
 
         return await withResponseFile(responseTimeout: responseTimeout) { responseURL in
-            await openHelper(
+            _ = await openHelper(
                 appURL: appURL,
                 arguments: arguments + ["--response-file", responseURL.path],
                 wait: true
@@ -210,7 +238,7 @@ enum PasteHelperController {
 
         let deadline = Date().addingTimeInterval(responseTimeout)
         while !fileManager.fileExists(atPath: responseURL.path), Date() < deadline {
-            try? await Task.sleep(for: .milliseconds(20))
+            try? await Task.sleep(for: responseFilePollInterval)
         }
 
         guard fileManager.fileExists(atPath: responseURL.path) else {
@@ -228,7 +256,7 @@ enum PasteHelperController {
         }
     }
 
-    private static func openHelper(appURL: URL, arguments: [String], wait: Bool) async {
+    private static func openHelper(appURL: URL, arguments: [String], wait: Bool) async -> Bool {
         await Task.detached(priority: .userInitiated) {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
@@ -247,8 +275,9 @@ enum PasteHelperController {
                 if wait {
                     process.waitUntilExit()
                 }
+                return true
             } catch {
-                return
+                return false
             }
         }.value
     }

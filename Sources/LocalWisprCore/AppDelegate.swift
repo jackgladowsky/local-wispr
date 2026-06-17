@@ -11,14 +11,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let settingsWindowController = SettingsWindowController()
     private let audioCapture = AudioCapture()
     private let logger = TimingLogger()
+    private let whisperServerController = WhisperServerController.makeDefault()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let panelController = DictationPanelController()
         let insertionController = InsertionController()
+        let managedWhisperServer = startManagedWhisperServer()
         let session = DictationSession(
             panelController: panelController,
             audioCapture: audioCapture,
-            sttEngine: EngineRegistry.makeSTTEngine(),
+            sttEngine: EngineRegistry.makeSTTEngine(preferredWhisperServer: managedWhisperServer),
             rewriteEngine: EngineRegistry.makeRewriteEngine(),
             insertionController: insertionController,
             logger: logger
@@ -52,10 +54,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         hotkeyController?.stop()
+        whisperServerController?.stop()
 
         if let autoPasteObserver {
             NotificationCenter.default.removeObserver(autoPasteObserver)
         }
+    }
+
+    private func startManagedWhisperServer() -> WhisperServerEngine? {
+        guard let whisperServerController else { return nil }
+        return whisperServerController.startIfNeeded() ? whisperServerController.engine : nil
     }
 
     private func observeAutoPasteAvailability() {
@@ -219,7 +227,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let session = DictationSession(
             panelController: panelController,
             audioCapture: audioCapture,
-            sttEngine: EngineRegistry.makeSTTEngine(),
+            sttEngine: EngineRegistry.makeSTTEngine(preferredWhisperServer: startManagedWhisperServer()),
             rewriteEngine: EngineRegistry.makeRewriteEngine(),
             insertionController: insertionController,
             logger: logger

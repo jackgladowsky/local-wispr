@@ -3,6 +3,99 @@ import Foundation
 import Testing
 
 @Test
+func audioRecordingResolvesReadyWavWithoutConversion() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let rawURL = directory.appendingPathComponent("recording.caf")
+    let wavURL = directory.appendingPathComponent("recording.wav")
+    try Data("raw".utf8).write(to: rawURL)
+    try Data("wav".utf8).write(to: wavURL)
+
+    let recording = AudioRecording(
+        rawURL: rawURL,
+        wavURL: wavURL,
+        startedAt: Date(),
+        endedAt: Date()
+    )
+
+    let resolvedURL = try await recording.whisperReadyWavURL { _, _ in
+        throw LocalWisprError.audioConversionFailed("ready recordings should not convert")
+    }
+
+    #expect(resolvedURL == wavURL)
+}
+
+@Test
+func audioRecordingConvertsDeferredWavOnDemandAndRemovesTemporaryFiles() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let rawURL = directory.appendingPathComponent("recording.caf")
+    let wavURL = directory.appendingPathComponent("recording.wav")
+    try Data("raw".utf8).write(to: rawURL)
+
+    let recording = AudioRecording(
+        rawURL: rawURL,
+        wavURL: wavURL,
+        startedAt: Date(),
+        endedAt: Date(),
+        fullSessionWavAvailability: .deferred
+    )
+
+    #expect(!FileManager.default.fileExists(atPath: wavURL.path))
+
+    let resolvedURL = try await recording.whisperReadyWavURL { rawURL, wavURL in
+        let rawData = try Data(contentsOf: rawURL)
+        try rawData.write(to: wavURL)
+    }
+
+    #expect(resolvedURL == wavURL)
+    #expect(FileManager.default.fileExists(atPath: rawURL.path))
+    #expect(FileManager.default.fileExists(atPath: wavURL.path))
+
+    recording.removeTemporaryFiles()
+
+    #expect(!FileManager.default.fileExists(atPath: rawURL.path))
+    #expect(!FileManager.default.fileExists(atPath: wavURL.path))
+}
+
+@Test
+func audioRecordingRemovesPartialDeferredWavOnConversionFailure() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let rawURL = directory.appendingPathComponent("recording.caf")
+    let wavURL = directory.appendingPathComponent("recording.wav")
+    try Data("raw".utf8).write(to: rawURL)
+
+    let recording = AudioRecording(
+        rawURL: rawURL,
+        wavURL: wavURL,
+        startedAt: Date(),
+        endedAt: Date(),
+        fullSessionWavAvailability: .deferred
+    )
+
+    var threwConversionFailure = false
+    do {
+        _ = try await recording.whisperReadyWavURL { _, wavURL in
+            try Data("partial".utf8).write(to: wavURL)
+            throw LocalWisprError.audioConversionFailed("synthetic failure")
+        }
+    } catch LocalWisprError.audioConversionFailed {
+        threwConversionFailure = true
+    }
+
+    #expect(threwConversionFailure)
+    #expect(FileManager.default.fileExists(atPath: rawURL.path))
+    #expect(!FileManager.default.fileExists(atPath: wavURL.path))
+
+    recording.removeTemporaryFiles()
+    #expect(!FileManager.default.fileExists(atPath: rawURL.path))
+}
+
+@Test
 func audioRecordingRemovesTemporaryFiles() throws {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("LocalWisprCoreTests", isDirectory: true)
@@ -43,4 +136,12 @@ func audioRecordingRemovesTemporaryFiles() throws {
     #expect(!FileManager.default.fileExists(atPath: chunkWavURL.path))
 
     try? FileManager.default.removeItem(at: directory)
+}
+
+private func temporaryDirectory() throws -> URL {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("LocalWisprCoreTests", isDirectory: true)
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory
 }

@@ -29,6 +29,13 @@ if pgrep -x LocalWisprPasteHelper >/dev/null 2>&1; then
     sleep 0.2
 fi
 
+# Clean up the app-managed default whisper-server if a prior dev install killed
+# Local Wispr before it could terminate its child process normally.
+if pgrep -f 'whisper-server.*LocalWispr/Models/whisper.*--port 8178' >/dev/null 2>&1; then
+    pkill -f 'whisper-server.*LocalWispr/Models/whisper.*--port 8178' || true
+    sleep 0.2
+fi
+
 bundle_version() {
     local app="$1"
     /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist" 2>/dev/null || echo 0
@@ -121,7 +128,14 @@ if [[ "$RESET_ACCESSIBILITY" == "1" ]]; then
     reset_accessibility_tcc
 fi
 
-open -n "$INSTALLED_APP"
+open_args=(-n)
+while IFS='=' read -r name value; do
+    if [[ "$name" == LOCAL_WISPR_* ]]; then
+        open_args+=(--env "$name=$value")
+    fi
+done < <(env)
+
+open "${open_args[@]}" "$INSTALLED_APP"
 
 if [[ "$RESET_ACCESSIBILITY" == "1" && "${LOCAL_WISPR_OPEN_ACCESSIBILITY_ON_RESET:-1}" == "1" ]]; then
     open 'x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility'

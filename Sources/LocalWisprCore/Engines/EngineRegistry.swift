@@ -1,9 +1,20 @@
 import Foundation
 
 enum EngineRegistry {
-    static func makeSTTEngine() -> STTEngine {
-        if let engine = WhisperCLIEngine.discover() {
-            return engine
+    static func makeSTTEngine(preferredWhisperServer: WhisperServerEngine? = nil) -> STTEngine {
+        let server = preferredWhisperServer ?? WhisperServerEngine.discover()
+        let cli = WhisperCLIEngine.discover()
+
+        if let server, let cli {
+            return FallbackSTTEngine(primary: server, fallback: cli)
+        }
+
+        if let server {
+            return server
+        }
+
+        if let cli {
+            return cli
         }
 
         return MissingSTTEngine(
@@ -23,8 +34,14 @@ enum EngineRegistry {
 
     static func statusLines() -> [String] {
         let stt: String
-        if let whisper = WhisperCLIEngine.discover() {
-            stt = "STT: \(whisper.name)"
+        let whisperServer = WhisperServerEngine.discover()
+        let whisperCLI = WhisperCLIEngine.discover()
+        if let whisperServer, let whisperCLI {
+            stt = "STT: \(FallbackSTTEngine(primary: whisperServer, fallback: whisperCLI).name)"
+        } else if let whisperServer {
+            stt = "STT: \(whisperServer.name)"
+        } else if let whisperCLI {
+            stt = "STT: \(whisperCLI.name)"
         } else {
             stt = "STT: not configured"
         }
@@ -46,6 +63,24 @@ struct MissingSTTEngine: STTEngine {
 
     func transcribe(_ request: TranscriptionRequest) async throws -> Transcript {
         throw LocalWisprError.missingSTTEngine(detail)
+    }
+}
+
+struct FallbackSTTEngine: STTEngine {
+    let primary: STTEngine
+    let fallback: STTEngine
+
+    var name: String {
+        "\(primary.name) with \(fallback.name) fallback"
+    }
+
+    func transcribe(_ request: TranscriptionRequest) async throws -> Transcript {
+        do {
+            return try await primary.transcribe(request)
+        } catch {
+            NSLog("LocalWispr STT primary failed; falling back: \(error.localizedDescription)")
+            return try await fallback.transcribe(request)
+        }
     }
 }
 
