@@ -1,0 +1,46 @@
+name: Bug report
+description: Report a reproducible Local Wispr problem
+title: "Bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Local Wispr. Please do not attach private audio, credentials, certificates, or sensitive timing logs.
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and hardware
+      placeholder: "macOS 15.2, M3 MacBook Pro"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Hotkey / recording
+        - Transcription engine
+        - Cleanup
+        - Paste / Accessibility
+        - Settings UI
+        - Build / install / release
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What did you do, what happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Checks run
+      description: Include safe output from swift test, engine checks, or timing fields if useful.
+      placeholder: |
+        swift test
+        scripts/check-local-engines.sh
+        tail -n 5 ~/Library/Logs/LocalWispr/mock-flow.log

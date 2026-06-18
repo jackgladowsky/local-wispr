@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 360" role="img" aria-labelledby="title desc">
+  <title id="title">Local Wispr listening overlay</title>
+  <desc id="desc">A small matte macOS dictation pill with live waveform bars near the menu bar notch.</desc>
+  <defs>
+    <linearGradient id="desktop" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#222832"/>
+      <stop offset="1" stop-color="#11141a"/>
+    </linearGradient>
+    <linearGradient id="bar" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#1d2027"/>
+      <stop offset="1" stop-color="#0f1116"/>
+    </linearGradient>
+    <linearGradient id="pill" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#242832"/>
+      <stop offset="1" stop-color="#11141a"/>
+    </linearGradient>
+    <filter id="softShadow" x="-40%" y="-80%" width="180%" height="260%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000" flood-opacity="0.34"/>
+    </filter>
+  </defs>
+  <rect width="720" height="360" rx="28" fill="url(#desktop)"/>
+  <rect x="0" y="0" width="720" height="34" fill="url(#bar)" opacity="0.92"/>
+  <rect x="309" y="0" width="102" height="28" rx="14" fill="#050609"/>
+  <circle cx="626" cy="17" r="4" fill="#c7cbd4" opacity="0.85"/>
+  <circle cx="648" cy="17" r="4" fill="#c7cbd4" opacity="0.65"/>
+  <circle cx="670" cy="17" r="4" fill="#c7cbd4" opacity="0.45"/>
+  <g filter="url(#softShadow)">
+    <rect x="319" y="39" width="82" height="36" rx="18" fill="url(#pill)" stroke="#fff" stroke-opacity="0.18"/>
+    <rect x="338" y="41" width="44" height="1" rx="0.5" fill="#fff" opacity="0.10"/>
+    <g fill="#f5f7fb">
+      <rect x="333" y="54" width="3" height="8" rx="1.5" opacity="0.56"/>
+      <rect x="341" y="49" width="3" height="18" rx="1.5" opacity="0.85"/>
+      <rect x="349" y="52" width="3" height="12" rx="1.5" opacity="0.70"/>
+      <rect x="357" y="47" width="3" height="22" rx="1.5" opacity="0.92"/>
+      <rect x="365" y="51" width="3" height="14" rx="1.5" opacity="0.78"/>
+      <rect x="373" y="56" width="3" height="5" rx="1.5" opacity="0.48"/>
+      <rect x="381" y="53" width="3" height="10" rx="1.5" opacity="0.64"/>
+    </g>
+  </g>
+  <text x="360" y="242" text-anchor="middle" fill="#edf0f5" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', Inter, sans-serif" font-size="30" font-weight="700">A tiny overlay that stays out of the way.</text>
+  <text x="360" y="283" text-anchor="middle" fill="#aeb6c5" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, sans-serif" font-size="18">Hold Control + Option + Space, speak, release.</text>
+</svg>

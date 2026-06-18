@@ -1,0 +1,39 @@
+name: Feature request
+description: Suggest an improvement for Local Wispr
+title: "Feature: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow or product gap should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like Local Wispr to do?
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Product area
+      options:
+        - Dictation speed / latency
+        - Transcription accuracy
+        - Privacy / local engines
+        - Paste / Accessibility
+        - Settings / UX
+        - Packaging / release
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Links, screenshots, or examples. Do not attach private audio.

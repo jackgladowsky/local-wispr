@@ -1,27 +1,55 @@
 # Local Wispr
 
-Local Wispr is a native macOS menu bar app for fast, fully local dictation. Hold the hotkey, speak, release, and the app transcribes, lightly cleans up, and inserts the text into the active app.
+<p align="center">
+  <img src="docs/assets/hero.svg" alt="Local Wispr: private, local-first dictation for macOS" width="900">
+</p>
+
+<p align="center">
+  <a href=".github/workflows/ci.yml"><img alt="CI" src="https://github.com/jackgladowsky/local-wispr/actions/workflows/ci.yml/badge.svg"></a>
+  <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-111111?logo=apple&logoColor=white">
+  <img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-f05138?logo=swift&logoColor=white">
+  <img alt="Local first" src="https://img.shields.io/badge/local--first-no%20cloud%20STT-2f7df6">
+</p>
+
+Local Wispr is a native macOS menu bar app for fast, private, hold-to-dictate transcription. Hold the hotkey, speak, release, and Local Wispr transcribes locally, lightly cleans up the text, and inserts it into the active app.
+
+It is built for the part of dictation that should feel instant: local microphone capture, native streaming speech-to-text, minimal cleanup, and fast paste insertion.
+
+## Why it exists
+
+Most polished dictation tools are either cloud services, paid subscriptions, file-first transcription apps, or power-user products with a lot of surface area. Local Wispr is intentionally narrower:
+
+- **Private by default** — no cloud transcription path, account, telemetry, or remote history.
+- **Fast by design** — streaming Moonshine STT starts on key-down and finalizes on key-up.
+- **Mac-native** — menu bar app, SwiftUI settings, matte listening overlay, paste helper, and macOS permissions.
+- **Readable and hackable** — Swift package, simple scripts, local engine setup, timing logs, and focused tests.
+
+## Preview
+
+<p align="center">
+  <img src="docs/assets/overlay.svg" alt="Local Wispr listening overlay" width="430">
+  <img src="docs/assets/settings.svg" alt="Local Wispr settings window" width="430">
+</p>
 
 ## Features
 
-- Local microphone capture, transcription, cleanup, and timing logs.
-- Native menu bar UX with a small status panel and SwiftUI settings.
 - Hold-to-dictate hotkey: `Control` + `Option` + `Space`.
-- Native Moonshine speech-to-text with streaming, offline `.ort` models, and no localhost STT in the normal path.
-- Basic local cleanup by default, with optional loopback `llama.cpp` server cleanup.
+- Native Moonshine speech-to-text through `moonshine-swift` with streaming `.ort` models.
+- Low-latency path: open stream on key-down, feed mic buffers live, finalize on release.
+- Basic local cleanup by default; optional loopback `llama.cpp` cleanup server.
 - Clipboard-preserving paste with focus and secure-field checks.
-- Separate paste helper app so Accessibility permission survives main-app rebuilds.
+- Separate paste helper app so Accessibility permission can survive main-app rebuilds.
+- Timing logs for every dictation session, including release-to-output latency.
+- Small matte macOS-style listening overlay with live mic-reactive waveform bars.
 
-## Requirements
+## Quick start
+
+Requirements:
 
 - macOS 14 or newer
 - Xcode Command Line Tools / Swift 6
-- Python 3 only if you opt into the development Moonshine sidecar fallback
-- Homebrew for optional `llama.cpp` cleanup setup
 - Microphone permission for dictation
 - Accessibility permission for automatic paste; without it, output is copied for manual `Command-V`
-
-## Quick Start
 
 ```sh
 git clone https://github.com/jackgladowsky/local-wispr.git
@@ -39,7 +67,25 @@ scripts/install-app.sh
 
 Open Local Wispr from the menu bar, complete permissions in **Settings**, then hold `Control` + `Option` + `Space` to dictate.
 
-## Local Engines
+## Performance posture
+
+Local Wispr is optimized around perceived dictation latency rather than batch transcription throughput:
+
+1. **Capture begins immediately** after the hotkey is pressed.
+2. **Native streaming STT is opened before speech ends**, so release does not have to start transcription from scratch.
+3. **Full-session WAV conversion is deferred** unless the fallback batch path needs it.
+4. **Final LLM cleanup is skipped by default** on the streaming fast path.
+5. **Paste insertion is async-aware** and avoids blocking on clipboard restoration.
+
+Every run writes timing fields such as `hotkey_to_recording_ms`, `stt_ms`, `insert_ms`, and `release_to_output_ms` to:
+
+```text
+~/Library/Logs/LocalWispr/mock-flow.log
+```
+
+See [`docs/performance.md`](docs/performance.md) for implementation notes, benchmark methodology, and market context against paid dictation tools.
+
+## Local engines
 
 Set up the default local runtime and check it:
 
@@ -53,26 +99,19 @@ Default paths:
 
 ```text
 Moonshine native model: ~/Library/Application Support/LocalWispr/Moonshine/models/en/medium-streaming
-Moonshine sidecar venv: ~/Library/Application Support/LocalWispr/Moonshine/venv (optional)
+Moonshine sidecar venv: ~/Library/Application Support/LocalWispr/Moonshine/venv (optional fallback)
 Cleanup model:          ~/Library/Application Support/LocalWispr/Models/cleanup/cleanup.gguf
 ```
 
-Local Wispr now uses Moonshine's native ONNX/C++ runtime through Swift. The app opens a native stream on key-down, feeds mic buffers while recording, then finalizes the stream on key-up. No Python process or localhost HTTP STT server is used when the native model is available.
+Local Wispr uses Moonshine's native ONNX/C++ runtime through Swift. No Python process or localhost HTTP STT server is used when the native model is available.
 
-The default native model is Moonshine Voice `en/medium-streaming` for better real dictation accuracy. Useful overrides:
+Useful overrides:
 
 ```sh
 LOCAL_WISPR_MOONSHINE_VOICE_ARCH=small-streaming scripts/setup-moonshine-native.sh
 LOCAL_WISPR_MOONSHINE_VOICE_ARCH=tiny-streaming scripts/setup-moonshine-native.sh
 LOCAL_WISPR_MOONSHINE_NATIVE_MODEL_DIR=/path/to/model scripts/install-app.sh
 LOCAL_WISPR_MOONSHINE_STREAM_UPLOAD_SECONDS=0.05 scripts/install-app.sh
-```
-
-The Python loopback sidecar is kept as an optional development fallback. To install and run it manually:
-
-```sh
-LOCAL_WISPR_SETUP_MOONSHINE_SERVER=1 scripts/setup-local-engines.sh
-scripts/start-moonshine-server.sh
 ```
 
 Optional LLM cleanup can use a local `llama.cpp` server:
@@ -84,45 +123,13 @@ LOCAL_WISPR_REWRITE_ENGINE=llama-server scripts/install-app.sh
 
 If no cleanup server is configured, Local Wispr uses Basic Local Cleanup.
 
-## Speed Defaults
+## Privacy model
 
-The app defaults to the low-latency path on main:
+Local Wispr is local-first. It does not use cloud transcription, accounts, remote history, or analytics. Audio temp files are written under the system temp directory during a dictation session and removed afterward. Optional STT/cleanup services are restricted to loopback URLs by default.
 
-- native Moonshine streaming STT is enabled by default;
-- full-session WAV conversion is deferred unless batch fallback needs it;
-- final streaming cleanup is skipped for faster release-to-output;
-- the Python loopback Moonshine sidecar is lazy fallback only, not a normal startup process;
-- paste-helper launch attempts and response polling are optimized.
+See [`docs/architecture.md`](docs/architecture.md) for the system map and privacy boundaries.
 
-Useful opt-outs for troubleshooting:
-
-```sh
-LOCAL_WISPR_DISABLE_STREAMING=1 scripts/install-app.sh
-LOCAL_WISPR_MOONSHINE_STREAMING=0 scripts/install-app.sh
-LOCAL_WISPR_DISABLE_MOONSHINE_NATIVE=1 scripts/install-app.sh
-LOCAL_WISPR_MOONSHINE_NATIVE_ARCH=small-streaming scripts/install-app.sh
-LOCAL_WISPR_MOONSHINE_TRAILING_SILENCE_SECONDS=0.25 scripts/install-app.sh
-LOCAL_WISPR_STREAMING_SKIP_FINAL_CLEANUP=0 scripts/install-app.sh
-LOCAL_WISPR_DISABLE_MANAGED_MOONSHINE_SERVER=1 scripts/install-app.sh
-```
-
-Clipboard restore remains on by default and runs asynchronously after paste so it does not block release-to-output latency. Unsafe insertion experiments are intentionally opt-in via `LOCAL_WISPR_INSERT_UNSAFE_*` variables.
-
-## Permissions
-
-| Permission | Required | Purpose | Fallback |
-| --- | --- | --- | --- |
-| Microphone | Yes | Captures dictation audio locally | Real dictation is unavailable |
-| Main App Accessibility | Optional | Lets the app post paste keystrokes | Copies output to clipboard |
-| Paste Helper Accessibility | Optional | Stable automatic paste across rebuilds | Copies output to clipboard |
-
-The recommended development path is to approve **Local Wispr Paste Helper** for Accessibility. If macOS permission state gets stale, reset it with:
-
-```sh
-scripts/reset-permissions.sh
-```
-
-## Build, Install, and Release
+## Developer workflow
 
 ```sh
 swift test
@@ -131,19 +138,30 @@ scripts/install-app.sh
 scripts/package-release.sh
 ```
 
-Release assets are written to `dist/release/` as a DMG, ZIP, and `SHA256SUMS.txt`. See [`docs/release.md`](docs/release.md) for signing, notarization, and GitHub release details.
-
-## Repository Layout
+Repository layout:
 
 ```text
-Sources/LocalWisprCore/      app logic
-Sources/LocalWispr/          menu bar app entry point
+Sources/LocalWisprCore/        app logic
+Sources/LocalWispr/            menu bar app entry point
 Sources/LocalWisprPasteHelper/ stable paste helper
-Packaging/                  app bundle plists
-scripts/                    setup, build, install, release, and engine helpers
-Tests/                      unit tests
+Packaging/                    app bundle plists
+scripts/                      setup, build, install, release, and engine helpers
+Tests/                        unit tests
 ```
 
-## Privacy
+## Documentation
 
-Local Wispr is local-first. It does not use cloud transcription, accounts, remote history, or analytics. Audio temp files are written under the system temp directory during a dictation session and removed afterward. STT and cleanup servers are restricted to loopback URLs by default.
+- [`docs/architecture.md`](docs/architecture.md) — local pipeline, components, and privacy boundaries.
+- [`docs/configuration.md`](docs/configuration.md) — environment variables and runtime toggles.
+- [`docs/development.md`](docs/development.md) — local development commands and repo hygiene.
+- [`docs/performance.md`](docs/performance.md) — latency strategy, benchmark notes, and market context.
+- [`docs/troubleshooting.md`](docs/troubleshooting.md) — permissions, engines, paste helper, and logs.
+- [`docs/release.md`](docs/release.md) — packaging, signing, notarization, and GitHub releases.
+
+## Project status
+
+Local Wispr is early, practical, and actively changing. The default path is tuned for Jack's local macOS workflow, but the codebase is structured to be readable and reusable.
+
+## License
+
+A public license has not been selected yet. If you want to reuse code from this repository, wait for a license file or ask first.

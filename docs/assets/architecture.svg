@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 520" role="img" aria-labelledby="title desc">
+  <title id="title">Local Wispr architecture</title>
+  <desc id="desc">Pipeline from hotkey and microphone capture through native Moonshine STT, local cleanup, and paste insertion.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#151922"/>
+      <stop offset="1" stop-color="#0d1016"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#232936"/>
+      <stop offset="1" stop-color="#171b24"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="#6d7f9f"/>
+    </marker>
+  </defs>
+  <rect width="1000" height="520" rx="28" fill="url(#bg)"/>
+  <text x="500" y="72" text-anchor="middle" fill="#f3f5f9" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', Inter, sans-serif" font-size="38" font-weight="750">Local-first dictation pipeline</text>
+  <text x="500" y="106" text-anchor="middle" fill="#aeb7c7" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, sans-serif" font-size="16">Audio, transcription, cleanup, and insertion stay on the Mac by default.</text>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, sans-serif">
+    <g fill="none" stroke="#6d7f9f" stroke-width="2" marker-end="url(#arrow)" opacity="0.72">
+      <path d="M205 235 H284"/>
+      <path d="M405 235 H484"/>
+      <path d="M605 235 H684"/>
+      <path d="M500 309 V364"/>
+    </g>
+    <g>
+      <rect x="72" y="170" width="134" height="130" rx="22" fill="url(#card)" stroke="#fff" stroke-opacity="0.08"/>
+      <text x="139" y="222" text-anchor="middle" fill="#f5f7fb" font-size="18" font-weight="700">Hotkey</text>
+      <text x="139" y="252" text-anchor="middle" fill="#aeb7c7" font-size="13">hold to record</text>
+    </g>
+    <g>
+      <rect x="284" y="170" width="134" height="130" rx="22" fill="url(#card)" stroke="#fff" stroke-opacity="0.08"/>
+      <text x="351" y="214" text-anchor="middle" fill="#f5f7fb" font-size="18" font-weight="700">Capture</text>
+      <text x="351" y="243" text-anchor="middle" fill="#aeb7c7" font-size="13">AVAudioEngine</text>
+      <text x="351" y="263" text-anchor="middle" fill="#aeb7c7" font-size="13">temp files cleaned</text>
+    </g>
+    <g>
+      <rect x="484" y="170" width="134" height="130" rx="22" fill="url(#card)" stroke="#fff" stroke-opacity="0.08"/>
+      <text x="551" y="214" text-anchor="middle" fill="#f5f7fb" font-size="18" font-weight="700">Moonshine</text>
+      <text x="551" y="243" text-anchor="middle" fill="#aeb7c7" font-size="13">native streaming</text>
+      <text x="551" y="263" text-anchor="middle" fill="#aeb7c7" font-size="13">offline model</text>
+    </g>
+    <g>
+      <rect x="684" y="170" width="134" height="130" rx="22" fill="url(#card)" stroke="#fff" stroke-opacity="0.08"/>
+      <text x="751" y="214" text-anchor="middle" fill="#f5f7fb" font-size="18" font-weight="700">Cleanup</text>
+      <text x="751" y="243" text-anchor="middle" fill="#aeb7c7" font-size="13">basic local</text>
+      <text x="751" y="263" text-anchor="middle" fill="#aeb7c7" font-size="13">optional llama.cpp</text>
+    </g>
+    <g>
+      <rect x="818" y="170" width="110" height="130" rx="22" fill="#1b283d" stroke="#4f8cff" stroke-opacity="0.24"/>
+      <text x="873" y="222" text-anchor="middle" fill="#f5f7fb" font-size="18" font-weight="700">Insert</text>
+      <text x="873" y="252" text-anchor="middle" fill="#aeb7c7" font-size="13">paste helper</text>
+    </g>
+    <g>
+      <rect x="330" y="364" width="340" height="82" rx="20" fill="#111722" stroke="#4f8cff" stroke-opacity="0.24"/>
+      <text x="500" y="397" text-anchor="middle" fill="#f5f7fb" font-size="17" font-weight="700">Strict privacy boundary</text>
+      <text x="500" y="423" text-anchor="middle" fill="#aeb7c7" font-size="13">Loopback-only optional services; no cloud transcription path.</text>
+    </g>
+  </g>
+</svg>

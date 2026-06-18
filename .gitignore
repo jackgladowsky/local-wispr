@@ -1,7 +1,13 @@
 .build/
 dist/
 .swiftpm/
+DerivedData/
+*.xcarchive
+*.xcresult
+*.dSYM/
 .DS_Store
+.env
+.env.*
 progress.md
 opt-loop/
 .auto/log.jsonl
@@ -14,6 +20,12 @@ opt-loop/
 *.m4a
 *.mp3
 *.flac
+*.mov
+*.mp4
+*.dmg
+*.zip
 *.gguf
 *.bin
 *.p12
+*.cer
+*.mobileprovision
