@@ -34,21 +34,21 @@ enum PanelPhase: String {
     var tint: Color {
         switch self {
         case .idle:
-            .secondary
+            Color(red: 0.50, green: 0.54, blue: 0.60)
         case .listening:
-            .red
+            Color(red: 0.20, green: 0.58, blue: 0.96)
         case .transcribing:
-            .blue
+            Color(red: 0.30, green: 0.50, blue: 0.92)
         case .polishing:
-            .teal
+            Color(red: 0.34, green: 0.70, blue: 0.80)
         case .inserted:
-            .green
+            Color(red: 0.24, green: 0.70, blue: 0.36)
         case .copied:
-            .indigo
+            Color(red: 0.42, green: 0.40, blue: 0.82)
         case .canceled:
-            .orange
+            Color(red: 0.88, green: 0.50, blue: 0.22)
         case .error:
-            .yellow
+            Color(red: 0.92, green: 0.32, blue: 0.28)
         }
     }
 }

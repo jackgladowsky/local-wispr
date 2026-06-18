@@ -9,4 +9,5 @@ final class PanelViewModel: ObservableObject {
         subtitle: "Ready",
         showsSpinner: false
     )
+    @Published var audioLevels = Array(repeating: Float(0), count: 9)
 }

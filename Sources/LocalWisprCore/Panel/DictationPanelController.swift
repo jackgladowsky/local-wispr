@@ -9,7 +9,12 @@ final class DictationPanelController {
 
     init() {
         panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 82),
+            contentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: DictationPanelMetrics.size.width,
+                height: DictationPanelMetrics.size.height
+            ),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -30,6 +35,9 @@ final class DictationPanelController {
     func show(_ snapshot: PanelSnapshot, autoHideAfter delay: TimeInterval? = nil) {
         hideWorkItem?.cancel()
         model.snapshot = snapshot
+        if snapshot.phase != .listening {
+            model.audioLevels = Self.silentAudioLevels
+        }
         positionPanel()
 
         if !panel.isVisible {
@@ -51,8 +59,21 @@ final class DictationPanelController {
         }
     }
 
+    func updateAudioLevels(_ levels: [Float]) {
+        guard model.snapshot.phase == .listening else { return }
+
+        let targetLevels = Self.normalizedAudioLevels(levels)
+        model.audioLevels = zip(model.audioLevels, targetLevels).map { current, target in
+            let attack = Float(0.62)
+            let release = Float(0.24)
+            let blend = target > current ? attack : release
+            return current + (target - current) * blend
+        }
+    }
+
     func hide() {
         hideWorkItem?.cancel()
+        model.audioLevels = Self.silentAudioLevels
 
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.16
@@ -62,13 +83,21 @@ final class DictationPanelController {
         }
     }
 
+    private static let silentAudioLevels = Array(repeating: Float(0), count: 9)
+
+    private static func normalizedAudioLevels(_ levels: [Float]) -> [Float] {
+        let clamped = levels.prefix(silentAudioLevels.count).map { min(max($0, 0), 1) }
+        guard clamped.count < silentAudioLevels.count else { return Array(clamped) }
+        return clamped + Array(repeating: Float(0), count: silentAudioLevels.count - clamped.count)
+    }
+
     private func positionPanel() {
         guard let screen = screenForPanel() else { return }
         let visibleFrame = screen.visibleFrame
         let size = panel.frame.size
         let origin = NSPoint(
             x: visibleFrame.midX - size.width / 2,
-            y: visibleFrame.maxY - size.height - 14
+            y: visibleFrame.maxY - size.height - 4
         )
         panel.setFrameOrigin(origin)
     }

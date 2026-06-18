@@ -16,6 +16,7 @@ final class AudioCapture: @unchecked Sendable {
     private var chunkWriter: AudioChunkWriter?
     private var chunkHandler: (@Sendable (AudioChunk) -> Void)?
     private var audioBufferHandler: (@Sendable (StreamingAudioBuffer) -> Void)?
+    private var audioLevelHandler: (@Sendable ([Float]) -> Void)?
 
     static func requestMicrophoneAccessIfNeeded() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
@@ -37,7 +38,8 @@ final class AudioCapture: @unchecked Sendable {
     func start(
         chunking: AudioChunkingConfiguration? = nil,
         onChunkFinalized: (@Sendable (AudioChunk) -> Void)? = nil,
-        onAudioBuffer: (@Sendable (StreamingAudioBuffer) -> Void)? = nil
+        onAudioBuffer: (@Sendable (StreamingAudioBuffer) -> Void)? = nil,
+        onAudioLevel: (@Sendable ([Float]) -> Void)? = nil
     ) throws {
         guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
             throw LocalWisprError.microphonePermissionDenied
@@ -78,6 +80,7 @@ final class AudioCapture: @unchecked Sendable {
             self.chunkWriter = chunkWriter
             self.chunkHandler = onChunkFinalized
             self.audioBufferHandler = onAudioBuffer
+            self.audioLevelHandler = onAudioLevel
         }
 
         inputNode.removeTap(onBus: 0)
@@ -100,6 +103,7 @@ final class AudioCapture: @unchecked Sendable {
                 self.chunkWriter = nil
                 self.chunkHandler = nil
                 self.audioBufferHandler = nil
+                self.audioLevelHandler = nil
                 return urls
             }
 
@@ -132,6 +136,7 @@ final class AudioCapture: @unchecked Sendable {
             chunkWriter = nil
             chunkHandler = nil
             audioBufferHandler = nil
+            audioLevelHandler = nil
             return state
         }
 
@@ -188,6 +193,7 @@ final class AudioCapture: @unchecked Sendable {
             chunkWriter = nil
             chunkHandler = nil
             audioBufferHandler = nil
+            audioLevelHandler = nil
             return urls
         }
 
@@ -196,7 +202,7 @@ final class AudioCapture: @unchecked Sendable {
 
     private func write(_ buffer: AVAudioPCMBuffer, receivedAt: Date) {
         let streamingBuffer = Self.streamingAudioBuffer(from: buffer, receivedAt: receivedAt)
-        let result = lock.withLock { () -> (pendingChunks: [PendingAudioChunk], chunkHandler: (@Sendable (AudioChunk) -> Void)?, audioBufferHandler: (@Sendable (StreamingAudioBuffer) -> Void)?, cleanupURLs: [URL]) in
+        let result = lock.withLock { () -> (pendingChunks: [PendingAudioChunk], chunkHandler: (@Sendable (AudioChunk) -> Void)?, audioBufferHandler: (@Sendable (StreamingAudioBuffer) -> Void)?, audioLevelHandler: (@Sendable ([Float]) -> Void)?, cleanupURLs: [URL]) in
             do {
                 try audioFile?.write(from: buffer)
             } catch {
@@ -205,14 +211,15 @@ final class AudioCapture: @unchecked Sendable {
 
             do {
                 let pendingChunks = try chunkWriter?.write(buffer, receivedAt: receivedAt) ?? []
-                return (pendingChunks, chunkHandler, audioBufferHandler, [])
+                return (pendingChunks, chunkHandler, audioBufferHandler, audioLevelHandler, [])
             } catch {
                 NSLog("LocalWispr failed to write streaming audio chunk: \(error.localizedDescription)")
                 let cleanupURLs = chunkWriter?.temporaryURLs ?? []
                 chunkWriter = nil
                 chunkHandler = nil
                 audioBufferHandler = nil
-                return ([], nil, nil, cleanupURLs)
+                audioLevelHandler = nil
+                return ([], nil, nil, nil, cleanupURLs)
             }
         }
 
@@ -220,6 +227,10 @@ final class AudioCapture: @unchecked Sendable {
 
         if let streamingBuffer, let audioBufferHandler = result.audioBufferHandler {
             audioBufferHandler(streamingBuffer)
+        }
+
+        if let streamingBuffer, let audioLevelHandler = result.audioLevelHandler {
+            audioLevelHandler(Self.waveformLevels(from: streamingBuffer.samples, barCount: 9))
         }
 
         guard let chunkHandler = result.chunkHandler else { return }
@@ -282,6 +293,33 @@ final class AudioCapture: @unchecked Sendable {
             sampleRate: buffer.format.sampleRate,
             receivedAt: receivedAt
         )
+    }
+
+    private static func waveformLevels(from samples: [Float], barCount: Int) -> [Float] {
+        guard barCount > 0, !samples.isEmpty else { return Array(repeating: 0, count: max(0, barCount)) }
+
+        return (0..<barCount).map { index in
+            let start = samples.count * index / barCount
+            let end = max(start + 1, samples.count * (index + 1) / barCount)
+            var sumOfSquares = 0.0
+
+            for sample in samples[start..<min(end, samples.count)] {
+                let value = Double(sample)
+                sumOfSquares += value * value
+            }
+
+            let count = max(1, min(end, samples.count) - start)
+            let rms = sqrt(sumOfSquares / Double(count))
+            return normalizedAudioLevel(fromRMS: rms)
+        }
+    }
+
+    private static func normalizedAudioLevel(fromRMS rms: Double) -> Float {
+        guard rms > 0 else { return 0 }
+
+        let decibels = 20 * log10(max(rms, 0.000_001))
+        let normalized = min(max((decibels + 58) / 50, 0), 1)
+        return Float(pow(normalized, 1.20))
     }
 
     static func monoFloatSamples(from buffer: AVAudioPCMBuffer) -> [Float]? {

@@ -263,11 +263,19 @@ final class DictationSession {
                 onAudioBuffer = nil
             }
 
+            let panelController = self.panelController
+            let onAudioLevel: @Sendable ([Float]) -> Void = { levels in
+                Task { @MainActor in
+                    panelController.updateAudioLevels(levels)
+                }
+            }
+
             do {
                 try audioCapture.start(
                     chunking: speculativeConfiguration?.audioChunkingConfiguration,
                     onChunkFinalized: onChunkFinalized,
-                    onAudioBuffer: onAudioBuffer
+                    onAudioBuffer: onAudioBuffer,
+                    onAudioLevel: onAudioLevel
                 )
             } catch {
                 await nativeStreamingFeeder?.cancel()
