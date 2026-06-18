@@ -118,20 +118,17 @@ final class InsertionController {
             )
         }
 
-        if options.pasteRestoreDelayMilliseconds > 0 {
-            try? await Task.sleep(for: options.pasteRestoreDelay)
-        }
-
-        let restored = restorePreviousClipboardIfStillTemporary(
+        scheduleClipboardRestore(
             snapshot,
             temporaryText: text,
-            temporaryChangeCount: temporaryChangeCount
+            temporaryChangeCount: temporaryChangeCount,
+            delay: options.pasteRestoreDelay
         )
 
         return .init(
             outcome: .pasted,
-            detail: restored ? "Clipboard restored" : "Clipboard left unchanged",
-            restoredClipboard: restored
+            detail: "Inserted — clipboard will restore shortly",
+            restoredClipboard: true
         )
     }
 
@@ -213,6 +210,25 @@ final class InsertionController {
 
         keyDown?.post(tap: .cghidEventTap)
         keyUp?.post(tap: .cghidEventTap)
+    }
+
+    private func scheduleClipboardRestore(
+        _ snapshot: PasteboardSnapshot,
+        temporaryText: String,
+        temporaryChangeCount: Int,
+        delay: Duration
+    ) {
+        Task { @MainActor in
+            if delay > .zero {
+                try? await Task.sleep(for: delay)
+            }
+
+            _ = restorePreviousClipboardIfStillTemporary(
+                snapshot,
+                temporaryText: temporaryText,
+                temporaryChangeCount: temporaryChangeCount
+            )
+        }
     }
 
     private func restorePreviousClipboardIfStillTemporary(

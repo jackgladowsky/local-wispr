@@ -15,7 +15,7 @@ func engineRegistryPrefersNativeMoonshineWithServerFallback() {
         preferredMoonshineServer: server
     )
 
-    #expect(engine.name == "Moonshine native en/small-streaming with Moonshine server 127.0.0.1:8179 fallback")
+    #expect(engine.name == "Moonshine native en/medium-streaming with Moonshine server 127.0.0.1:8179 fallback")
 }
 
 @Test

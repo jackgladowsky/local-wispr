@@ -7,7 +7,7 @@ func insertionLatencyOptionsUseClipboardSafeDefaults() {
     let options = InsertionLatencyOptions.current(environment: [:])
 
     #expect(options.pasteRestoreDelayMilliseconds == InsertionLatencyOptions.defaultPasteRestoreDelayMilliseconds)
-    #expect(options.pasteRestoreDelay == .milliseconds(100))
+    #expect(options.pasteRestoreDelay == .milliseconds(50))
     #expect(options.skipsClipboardRestore == false)
 }
 

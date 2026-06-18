@@ -18,7 +18,8 @@ func streamingAudioFeederAggregatesAndFlushesBuffers() async throws {
     let session = RecordingStreamingSession()
     let feeder = StreamingSTTAudioFeeder(
         session: session,
-        targetBufferDuration: 0.1
+        targetBufferDuration: 0.1,
+        trailingSilenceDuration: 0
     )
     let now = Date()
 
@@ -45,6 +46,33 @@ func streamingAudioFeederAggregatesAndFlushesBuffers() async throws {
     #expect(appended.count == 1)
     #expect(appended.first?.samples.count == 1600)
     #expect(appended.first?.sampleRate == 16000)
+}
+
+@Test
+func streamingAudioFeederAppendsTrailingSilenceOnFinish() async throws {
+    let session = RecordingStreamingSession()
+    let feeder = StreamingSTTAudioFeeder(
+        session: session,
+        targetBufferDuration: 0.1,
+        trailingSilenceDuration: 0.05
+    )
+    let now = Date()
+
+    await feeder.accept(
+        StreamingAudioBuffer(
+            samples: Array(repeating: 0.1, count: 1600),
+            sampleRate: 16000,
+            receivedAt: now
+        )
+    )
+
+    try await feeder.finish()
+
+    let appended = session.appendedBuffers
+    #expect(appended.count == 2)
+    #expect(appended[0].samples.count == 1600)
+    #expect(appended[1].samples.count == 800)
+    #expect(appended[1].samples.allSatisfy { $0 == 0 })
 }
 
 @Test

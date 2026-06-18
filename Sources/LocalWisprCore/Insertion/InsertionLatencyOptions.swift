@@ -2,12 +2,14 @@ import Foundation
 
 /// Runtime knobs for insertion latency experiments.
 ///
-/// Defaults preserve clipboard restoration behavior: Local Wispr waits before restoring so the
-/// target app can consume the temporary pasteboard contents. Lower restore delays and skipping
-/// restoration are intentionally exposed only through `LOCAL_WISPR_INSERT_UNSAFE_*` variables
-/// because restoring too early can make the target paste the previous clipboard instead.
+/// Defaults preserve clipboard restoration behavior, but the restore runs after insertion has
+/// returned so clipboard safety does not block release-to-output latency. The delay gives target
+/// apps time to consume the temporary pasteboard contents before Local Wispr restores the previous
+/// clipboard. Lower restore delays and skipping restoration are intentionally exposed only through
+/// `LOCAL_WISPR_INSERT_UNSAFE_*` variables because restoring too early can make the target paste
+/// the previous clipboard instead.
 struct InsertionLatencyOptions: Equatable {
-    static let defaultPasteRestoreDelayMilliseconds = 100
+    static let defaultPasteRestoreDelayMilliseconds = 50
     static let unsafeSkipClipboardRestoreKey = "LOCAL_WISPR_INSERT_UNSAFE_SKIP_CLIPBOARD_RESTORE"
     static let unsafeRestoreDelayKey = "LOCAL_WISPR_INSERT_UNSAFE_RESTORE_DELAY_MS"
 

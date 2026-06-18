@@ -95,7 +95,7 @@ final class MoonshineServerController {
         let backend = environment["LOCAL_WISPR_MOONSHINE_BACKEND"] ?? "voice"
         let model = environment["LOCAL_WISPR_MOONSHINE_MODEL"] ?? "UsefulSensors/moonshine-streaming-small"
         let language = environment["LOCAL_WISPR_MOONSHINE_LANGUAGE"] ?? "en"
-        let voiceArch = environment["LOCAL_WISPR_MOONSHINE_VOICE_ARCH"] ?? "small-streaming"
+        let voiceArch = environment["LOCAL_WISPR_MOONSHINE_VOICE_ARCH"] ?? "medium-streaming"
         let logURL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/LocalWispr/moonshine-server.log")
 

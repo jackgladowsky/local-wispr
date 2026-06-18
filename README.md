@@ -52,18 +52,18 @@ scripts/smoke-local-engines.sh
 Default paths:
 
 ```text
-Moonshine native model: ~/Library/Application Support/LocalWispr/Moonshine/models/en/small-streaming
+Moonshine native model: ~/Library/Application Support/LocalWispr/Moonshine/models/en/medium-streaming
 Moonshine sidecar venv: ~/Library/Application Support/LocalWispr/Moonshine/venv (optional)
 Cleanup model:          ~/Library/Application Support/LocalWispr/Models/cleanup/cleanup.gguf
 ```
 
 Local Wispr now uses Moonshine's native ONNX/C++ runtime through Swift. The app opens a native stream on key-down, feeds mic buffers while recording, then finalizes the stream on key-up. No Python process or localhost HTTP STT server is used when the native model is available.
 
-The default native model is Moonshine Voice `en/small-streaming`. Useful overrides:
+The default native model is Moonshine Voice `en/medium-streaming` for better real dictation accuracy. Useful overrides:
 
 ```sh
+LOCAL_WISPR_MOONSHINE_VOICE_ARCH=small-streaming scripts/setup-moonshine-native.sh
 LOCAL_WISPR_MOONSHINE_VOICE_ARCH=tiny-streaming scripts/setup-moonshine-native.sh
-LOCAL_WISPR_MOONSHINE_VOICE_ARCH=medium-streaming scripts/setup-moonshine-native.sh
 LOCAL_WISPR_MOONSHINE_NATIVE_MODEL_DIR=/path/to/model scripts/install-app.sh
 LOCAL_WISPR_MOONSHINE_STREAM_UPLOAD_SECONDS=0.05 scripts/install-app.sh
 ```
@@ -100,11 +100,13 @@ Useful opt-outs for troubleshooting:
 LOCAL_WISPR_DISABLE_STREAMING=1 scripts/install-app.sh
 LOCAL_WISPR_MOONSHINE_STREAMING=0 scripts/install-app.sh
 LOCAL_WISPR_DISABLE_MOONSHINE_NATIVE=1 scripts/install-app.sh
+LOCAL_WISPR_MOONSHINE_NATIVE_ARCH=small-streaming scripts/install-app.sh
+LOCAL_WISPR_MOONSHINE_TRAILING_SILENCE_SECONDS=0.25 scripts/install-app.sh
 LOCAL_WISPR_STREAMING_SKIP_FINAL_CLEANUP=0 scripts/install-app.sh
 LOCAL_WISPR_DISABLE_MANAGED_MOONSHINE_SERVER=1 scripts/install-app.sh
 ```
 
-Clipboard restore remains on by default. Unsafe insertion experiments are intentionally opt-in via `LOCAL_WISPR_INSERT_UNSAFE_*` variables.
+Clipboard restore remains on by default and runs asynchronously after paste so it does not block release-to-output latency. Unsafe insertion experiments are intentionally opt-in via `LOCAL_WISPR_INSERT_UNSAFE_*` variables.
 
 ## Permissions
 

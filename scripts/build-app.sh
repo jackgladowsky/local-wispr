@@ -57,7 +57,7 @@ moonshine_required_model_files() {
 
 copy_moonshine_native_model() {
     local language="${LOCAL_WISPR_MOONSHINE_LANGUAGE:-en}"
-    local arch="${LOCAL_WISPR_MOONSHINE_NATIVE_ARCH:-${LOCAL_WISPR_MOONSHINE_VOICE_ARCH:-small-streaming}}"
+    local arch="${LOCAL_WISPR_MOONSHINE_NATIVE_ARCH:-${LOCAL_WISPR_MOONSHINE_VOICE_ARCH:-medium-streaming}}"
     local source="${LOCAL_WISPR_MOONSHINE_NATIVE_MODEL_SOURCE:-${LOCAL_WISPR_MOONSHINE_NATIVE_MODEL_DIR:-}}"
     local app_support_moonshine_dir="${LOCAL_WISPR_MOONSHINE_DIR:-$HOME/Library/Application Support/LocalWispr/Moonshine}"
     local app_support_source="$app_support_moonshine_dir/models/$language/$arch"

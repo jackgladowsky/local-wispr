@@ -28,7 +28,7 @@ from urllib.parse import urlparse
 
 DEFAULT_TRANSFORMERS_MODEL = "UsefulSensors/moonshine-streaming-small"
 DEFAULT_VOICE_LANGUAGE = "en"
-DEFAULT_VOICE_ARCH = "small-streaming"
+DEFAULT_VOICE_ARCH = "medium-streaming"
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 

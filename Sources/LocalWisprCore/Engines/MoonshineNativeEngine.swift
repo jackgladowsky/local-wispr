@@ -15,7 +15,7 @@ struct MoonshineNativeEngine: StreamingSTTEngine {
     init(
         modelDirectory: URL,
         language: String = "en",
-        arch: MoonshineNativeModelArch = .smallStreaming,
+        arch: MoonshineNativeModelArch = .mediumStreaming,
         runtime: any MoonshineNativeRuntime = MoonshineVoiceRuntime()
     ) {
         self.modelDirectory = modelDirectory
@@ -53,7 +53,7 @@ struct MoonshineNativeEngine: StreamingSTTEngine {
             .nilIfEmpty ?? "en"
         let archName = environment["LOCAL_WISPR_MOONSHINE_NATIVE_ARCH"]
             ?? environment["LOCAL_WISPR_MOONSHINE_VOICE_ARCH"]
-            ?? "small-streaming"
+            ?? "medium-streaming"
         guard let arch = MoonshineNativeModelArch(rawValue: archName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) else {
             return nil
         }
