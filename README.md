@@ -164,4 +164,4 @@ Local Wispr is early, practical, and actively changing. The default path is tune
 
 ## License
 
-A public license has not been selected yet. If you want to reuse code from this repository, wait for a license file or ask first.
+MIT — see [`LICENSE`](LICENSE).
