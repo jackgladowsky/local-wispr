@@ -14,6 +14,17 @@ struct TranscriptionRequest: Sendable {
     let duration: TimeInterval
 }
 
+struct StreamingAudioBuffer: Sendable, Equatable {
+    let samples: [Float]
+    let sampleRate: Double
+    let receivedAt: Date
+
+    var duration: TimeInterval {
+        guard sampleRate.isFinite, sampleRate > 0 else { return 0 }
+        return Double(samples.count) / sampleRate
+    }
+}
+
 struct TranscriptSegment: Equatable, Sendable {
     let text: String
     let startTime: TimeInterval
@@ -39,6 +50,17 @@ struct CleanedText: Equatable, Sendable {
 protocol STTEngine: Sendable {
     var name: String { get }
     func transcribe(_ request: TranscriptionRequest) async throws -> Transcript
+}
+
+protocol StreamingSTTEngine: STTEngine {
+    func startStreamingSession(startedAt: Date) async throws -> StreamingSTTSession
+}
+
+protocol StreamingSTTSession: Sendable {
+    var name: String { get }
+    func append(_ buffer: StreamingAudioBuffer) async throws
+    func finish(endedAt: Date) async throws -> Transcript
+    func cancel() async
 }
 
 protocol RewriteEngine: Sendable {

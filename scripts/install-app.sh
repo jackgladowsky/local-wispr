@@ -29,13 +29,6 @@ if pgrep -x LocalWisprPasteHelper >/dev/null 2>&1; then
     sleep 0.2
 fi
 
-# Clean up the app-managed default whisper-server if a prior dev install killed
-# Local Wispr before it could terminate its child process normally.
-if pgrep -f 'whisper-server.*LocalWispr/Models/whisper.*--port 8178' >/dev/null 2>&1; then
-    pkill -f 'whisper-server.*LocalWispr/Models/whisper.*--port 8178' || true
-    sleep 0.2
-fi
-
 bundle_version() {
     local app="$1"
     /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist" 2>/dev/null || echo 0

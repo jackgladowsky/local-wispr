@@ -7,7 +7,7 @@ Local Wispr is a native macOS menu bar app for fast, fully local dictation. Hold
 - Local microphone capture, transcription, cleanup, and timing logs.
 - Native menu bar UX with a small status panel and SwiftUI settings.
 - Hold-to-dictate hotkey: `Control` + `Option` + `Space`.
-- `whisper.cpp` speech-to-text with automatic loopback `whisper-server` support and CLI fallback.
+- Streaming Moonshine speech-to-text via a local loopback sidecar.
 - Basic local cleanup by default, with optional loopback `llama.cpp` server cleanup.
 - Clipboard-preserving paste with focus and secure-field checks.
 - Separate paste helper app so Accessibility permission survives main-app rebuilds.
@@ -16,7 +16,8 @@ Local Wispr is a native macOS menu bar app for fast, fully local dictation. Hold
 
 - macOS 14 or newer
 - Xcode Command Line Tools / Swift 6
-- Homebrew for local engine setup
+- Python 3 for the local Moonshine sidecar
+- Homebrew for optional `llama.cpp` cleanup setup
 - Microphone permission for dictation
 - Accessibility permission for automatic paste; without it, output is copied for manual `Command-V`
 
@@ -40,7 +41,7 @@ Open Local Wispr from the menu bar, complete permissions in **Settings**, then h
 
 ## Local Engines
 
-Set up the default local models and tools:
+Set up the default local runtime and check it:
 
 ```sh
 scripts/setup-local-engines.sh
@@ -51,17 +52,32 @@ scripts/smoke-local-engines.sh
 Default paths:
 
 ```text
-whisper-cli:   /opt/homebrew/bin/whisper-cli or PATH
-Whisper model: ~/Library/Application Support/LocalWispr/Models/whisper/ggml-base.en.bin
-Cleanup model: ~/Library/Application Support/LocalWispr/Models/cleanup/cleanup.gguf
+Moonshine venv:  ~/Library/Application Support/LocalWispr/Moonshine/venv
+Moonshine script: ~/Library/Application Support/LocalWispr/Moonshine/moonshine_server.py
+Cleanup model:   ~/Library/Application Support/LocalWispr/Models/cleanup/cleanup.gguf
 ```
 
-For lower STT latency, Local Wispr starts a managed loopback `whisper-server` when `whisper-server` and the local Whisper model are available. It falls back to `whisper-cli` if the server is unavailable. Non-loopback STT server URLs are rejected.
+Local Wispr now uses Moonshine for STT. When the Moonshine runtime is installed, the app starts a managed loopback sidecar on `127.0.0.1:8179` and uses the sidecar's streaming-session API by default: it opens a stream on key-down, feeds mic buffers while recording, then finalizes the stream on key-up.
 
-You can also run the server manually:
+You can also run the sidecar manually:
 
 ```sh
-scripts/start-whisper-server.sh
+scripts/start-moonshine-server.sh
+```
+
+The default backend is Moonshine Voice, the optimized ONNX/C++ runtime, using `en/small-streaming`. Useful overrides:
+
+```sh
+LOCAL_WISPR_MOONSHINE_VOICE_ARCH=tiny-streaming scripts/start-moonshine-server.sh
+LOCAL_WISPR_MOONSHINE_VOICE_ARCH=medium-streaming scripts/start-moonshine-server.sh
+LOCAL_WISPR_MOONSHINE_STREAM_UPLOAD_SECONDS=0.05 scripts/install-app.sh
+LOCAL_WISPR_MOONSHINE_SERVER_URL=http://127.0.0.1:8179/transcribe scripts/install-app.sh
+```
+
+A slower Hugging Face Transformers backend is still available for checkpoint experiments:
+
+```sh
+LOCAL_WISPR_MOONSHINE_BACKEND=transformers LOCAL_WISPR_MOONSHINE_MODEL=UsefulSensors/moonshine-streaming-tiny scripts/start-moonshine-server.sh
 ```
 
 Optional LLM cleanup can use a local `llama.cpp` server:
@@ -77,20 +93,19 @@ If no cleanup server is configured, Local Wispr uses Basic Local Cleanup.
 
 The app defaults to the low-latency path on main:
 
-- streaming STT is enabled by default;
-- chunks use adaptive local audio boundaries;
+- native Moonshine streaming STT is enabled by default;
 - full-session WAV conversion is deferred unless batch fallback needs it;
 - final streaming cleanup is skipped for faster release-to-output;
-- a managed loopback Whisper server is started and used automatically when available;
+- a managed loopback Moonshine sidecar is started and used automatically when available;
 - paste-helper launch attempts and response polling are optimized.
 
 Useful opt-outs for troubleshooting:
 
 ```sh
 LOCAL_WISPR_DISABLE_STREAMING=1 scripts/install-app.sh
+LOCAL_WISPR_MOONSHINE_STREAMING=0 scripts/install-app.sh
 LOCAL_WISPR_STREAMING_SKIP_FINAL_CLEANUP=0 scripts/install-app.sh
-LOCAL_WISPR_STREAMING_ADAPTIVE_CHUNKS=0 scripts/install-app.sh
-LOCAL_WISPR_DISABLE_WHISPER_SERVER=1 scripts/install-app.sh
+LOCAL_WISPR_DISABLE_MANAGED_MOONSHINE_SERVER=1 scripts/install-app.sh
 ```
 
 Clipboard restore remains on by default. Unsafe insertion experiments are intentionally opt-in via `LOCAL_WISPR_INSERT_UNSAFE_*` variables.
@@ -133,4 +148,4 @@ Tests/                      unit tests
 
 ## Privacy
 
-Local Wispr is local-first. It does not use cloud transcription, accounts, remote history, or analytics. Audio temp files are written under the system temp directory during a dictation session and removed afterward.
+Local Wispr is local-first. It does not use cloud transcription, accounts, remote history, or analytics. Audio temp files are written under the system temp directory during a dictation session and removed afterward. STT and cleanup servers are restricted to loopback URLs by default.

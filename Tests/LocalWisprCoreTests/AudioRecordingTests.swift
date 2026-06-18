@@ -19,7 +19,7 @@ func audioRecordingResolvesReadyWavWithoutConversion() async throws {
         endedAt: Date()
     )
 
-    let resolvedURL = try await recording.whisperReadyWavURL { _, _ in
+    let resolvedURL = try await recording.sttReadyWavURL { _, _ in
         throw LocalWisprError.audioConversionFailed("ready recordings should not convert")
     }
 
@@ -45,7 +45,7 @@ func audioRecordingConvertsDeferredWavOnDemandAndRemovesTemporaryFiles() async t
 
     #expect(!FileManager.default.fileExists(atPath: wavURL.path))
 
-    let resolvedURL = try await recording.whisperReadyWavURL { rawURL, wavURL in
+    let resolvedURL = try await recording.sttReadyWavURL { rawURL, wavURL in
         let rawData = try Data(contentsOf: rawURL)
         try rawData.write(to: wavURL)
     }
@@ -79,7 +79,7 @@ func audioRecordingRemovesPartialDeferredWavOnConversionFailure() async throws {
 
     var threwConversionFailure = false
     do {
-        _ = try await recording.whisperReadyWavURL { _, wavURL in
+        _ = try await recording.sttReadyWavURL { _, wavURL in
             try Data("partial".utf8).write(to: wavURL)
             throw LocalWisprError.audioConversionFailed("synthetic failure")
         }

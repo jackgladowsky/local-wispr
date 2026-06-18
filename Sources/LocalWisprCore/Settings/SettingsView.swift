@@ -165,9 +165,9 @@ struct SettingsView: View {
             }
 
             GridRow {
-                Text("Whisper model")
+                Text("Moonshine runtime")
                     .foregroundStyle(.secondary)
-                Text(model.whisperModelPath)
+                Text(model.moonshineRuntimePath)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }

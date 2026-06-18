@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_SUPPORT="$HOME/Library/Application Support/LocalWispr"
-WHISPER_MODEL="${LOCAL_WISPR_WHISPER_MODEL:-$APP_SUPPORT/Models/whisper/ggml-base.en.bin}"
-WHISPER_SERVER_URL="${LOCAL_WISPR_WHISPER_SERVER_URL:-${LOCAL_WISPR_WHISPER_SERVER_ENDPOINT:-http://127.0.0.1:8178/inference}}"
+MOONSHINE_DIR="${LOCAL_WISPR_MOONSHINE_DIR:-$APP_SUPPORT/Moonshine}"
+MOONSHINE_VENV="${LOCAL_WISPR_MOONSHINE_VENV:-$MOONSHINE_DIR/venv}"
+MOONSHINE_BACKEND="${LOCAL_WISPR_MOONSHINE_BACKEND:-voice}"
+MOONSHINE_MODEL="${LOCAL_WISPR_MOONSHINE_MODEL:-UsefulSensors/moonshine-streaming-small}"
+MOONSHINE_LANGUAGE="${LOCAL_WISPR_MOONSHINE_LANGUAGE:-en}"
+MOONSHINE_VOICE_ARCH="${LOCAL_WISPR_MOONSHINE_VOICE_ARCH:-small-streaming}"
+MOONSHINE_SERVER_URL="${LOCAL_WISPR_MOONSHINE_SERVER_URL:-${LOCAL_WISPR_MOONSHINE_SERVER_ENDPOINT:-http://127.0.0.1:8179/transcribe}}"
 CLEANUP_MODEL="${LOCAL_WISPR_CLEANUP_MODEL:-$APP_SUPPORT/Models/cleanup/cleanup.gguf}"
 LLAMA_SERVER_URL="${LOCAL_WISPR_LLAMA_SERVER_URL:-${LOCAL_WISPR_LLAMA_SERVER_ENDPOINT:-http://127.0.0.1:8080/completion}}"
 
@@ -34,7 +40,7 @@ PY
 }
 
 status_line() {
-    printf '%-18s %s\n' "$1" "$2"
+    printf '%-20s %s\n' "$1" "$2"
 }
 
 find_executable() {
@@ -45,10 +51,10 @@ find_executable() {
     fi
 
     for candidate in \
-        "/opt/homebrew/opt/whisper-cpp/bin/$name" \
-        "/usr/local/opt/whisper-cpp/bin/$name" \
         "/opt/homebrew/opt/llama.cpp/bin/$name" \
-        "/usr/local/opt/llama.cpp/bin/$name"; do
+        "/usr/local/opt/llama.cpp/bin/$name" \
+        "/opt/homebrew/bin/$name" \
+        "/usr/local/bin/$name"; do
         if [[ -x "$candidate" ]]; then
             echo "$candidate"
             return 0
@@ -61,30 +67,30 @@ find_executable() {
 echo "Local Wispr engine check"
 echo
 
-if whisper_cli="$(find_executable whisper-cli)"; then
-    status_line "STT executable:" "$whisper_cli"
+if [[ -x "$MOONSHINE_VENV/bin/python" ]]; then
+    status_line "Moonshine Python:" "$MOONSHINE_VENV/bin/python"
 else
-    status_line "STT executable:" "missing whisper-cli"
+    status_line "Moonshine Python:" "missing; run scripts/setup-local-engines.sh"
 fi
 
-if [[ -f "$WHISPER_MODEL" ]]; then
-    status_line "Whisper model:" "$WHISPER_MODEL"
+if [[ -r "$MOONSHINE_DIR/moonshine_server.py" ]]; then
+    status_line "Moonshine sidecar:" "$MOONSHINE_DIR/moonshine_server.py"
+elif [[ -r "$SCRIPT_DIR/moonshine_server.py" ]]; then
+    status_line "Moonshine sidecar:" "$SCRIPT_DIR/moonshine_server.py"
 else
-    status_line "Whisper model:" "missing $WHISPER_MODEL"
+    status_line "Moonshine sidecar:" "missing"
 fi
 
-if whisper_server="$(find_executable whisper-server)"; then
-    status_line "whisper-server:" "$whisper_server"
-else
-    status_line "whisper-server:" "missing"
-fi
+status_line "Moonshine backend:" "$MOONSHINE_BACKEND"
+status_line "Moonshine model:" "$MOONSHINE_MODEL"
+status_line "Moonshine voice:" "$MOONSHINE_LANGUAGE/$MOONSHINE_VOICE_ARCH"
 
-if ! is_loopback_url "$WHISPER_SERVER_URL"; then
-    status_line "whisper server:" "refusing non-loopback URL $WHISPER_SERVER_URL"
-elif curl -fsS --max-time 2 "$(url_origin "$WHISPER_SERVER_URL")" >/dev/null 2>&1; then
-    status_line "whisper server:" "responding at $WHISPER_SERVER_URL"
+if ! is_loopback_url "$MOONSHINE_SERVER_URL"; then
+    status_line "Moonshine server:" "refusing non-loopback URL $MOONSHINE_SERVER_URL"
+elif curl -fsS --max-time 2 "$(url_origin "$MOONSHINE_SERVER_URL")" >/dev/null 2>&1; then
+    status_line "Moonshine server:" "responding at $MOONSHINE_SERVER_URL"
 else
-    status_line "whisper server:" "not running at $WHISPER_SERVER_URL"
+    status_line "Moonshine server:" "not running at $MOONSHINE_SERVER_URL"
 fi
 
 if llama_cli="$(find_executable llama-cli)"; then
@@ -117,5 +123,5 @@ else
 fi
 
 echo
+echo "Local Wispr uses the loopback Moonshine sidecar for STT."
 echo "The app can run with Basic Local Cleanup when llama.cpp cleanup is unavailable."
-echo "When available, Local Wispr starts/uses loopback whisper-server by default with whisper-cli fallback."

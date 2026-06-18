@@ -14,17 +14,27 @@ final class DictationSession {
         let target: InsertionTarget?
         let trace: TimingTrace
         let speculativeCoordinator: SpeculativeDictationCoordinator?
+        let nativeStreamingSession: StreamingSTTSession?
+        let nativeStreamingFeeder: StreamingSTTAudioFeeder?
 
         init(
             startedAt: Date,
             target: InsertionTarget?,
             trace: TimingTrace,
-            speculativeCoordinator: SpeculativeDictationCoordinator? = nil
+            speculativeCoordinator: SpeculativeDictationCoordinator? = nil,
+            nativeStreamingSession: StreamingSTTSession? = nil,
+            nativeStreamingFeeder: StreamingSTTAudioFeeder? = nil
         ) {
             self.startedAt = startedAt
             self.target = target
             self.trace = trace
             self.speculativeCoordinator = speculativeCoordinator
+            self.nativeStreamingSession = nativeStreamingSession
+            self.nativeStreamingFeeder = nativeStreamingFeeder
+        }
+
+        var usesStreamingSTT: Bool {
+            speculativeCoordinator != nil || nativeStreamingSession != nil
         }
     }
 
@@ -117,7 +127,7 @@ final class DictationSession {
         state = .processing
 
         let recording: AudioRecording
-        let fullSessionWavConversion: FullSessionWavConversion = context.speculativeCoordinator != nil && Self.shouldDeferStreamingFallbackAudio
+        let fullSessionWavConversion: FullSessionWavConversion = context.usesStreamingSTT && Self.shouldDeferStreamingFallbackAudio
             ? .deferred
             : .synchronous
         do {
@@ -146,10 +156,13 @@ final class DictationSession {
 
     func cancel() {
         let speculativeCoordinator: SpeculativeDictationCoordinator?
+        let nativeStreamingFeeder: StreamingSTTAudioFeeder?
         if case .recording(let context) = state {
             speculativeCoordinator = context.speculativeCoordinator
+            nativeStreamingFeeder = context.nativeStreamingFeeder
         } else {
             speculativeCoordinator = nil
+            nativeStreamingFeeder = nil
         }
 
         processingTask?.cancel()
@@ -157,6 +170,7 @@ final class DictationSession {
         audioCapture.cancel()
         Task {
             await speculativeCoordinator?.cancel()
+            await nativeStreamingFeeder?.cancel()
         }
         state = .idle
 
@@ -194,7 +208,27 @@ final class DictationSession {
 
         do {
             let recordingStartedAt = Date()
-            let speculativeConfiguration = SpeculativeDictationConfiguration.isEnabledFromEnvironment
+            let nativeStreamingSession: StreamingSTTSession?
+            let nativeStreamingFeeder: StreamingSTTAudioFeeder?
+            if
+                Self.shouldUseNativeStreamingSTT,
+                let streamingEngine = sttEngine as? any StreamingSTTEngine
+            {
+                do {
+                    let session = try await streamingEngine.startStreamingSession(startedAt: recordingStartedAt)
+                    nativeStreamingSession = session
+                    nativeStreamingFeeder = StreamingSTTAudioFeeder(session: session)
+                } catch {
+                    NSLog("LocalWispr failed to start native streaming STT; falling back to chunk/batch: \(error.localizedDescription)")
+                    nativeStreamingSession = nil
+                    nativeStreamingFeeder = nil
+                }
+            } else {
+                nativeStreamingSession = nil
+                nativeStreamingFeeder = nil
+            }
+
+            let speculativeConfiguration = nativeStreamingSession == nil && SpeculativeDictationConfiguration.isEnabledFromEnvironment
                 ? SpeculativeDictationConfiguration.fromEnvironment()
                 : nil
             let speculativeCoordinator = speculativeConfiguration.map {
@@ -217,10 +251,28 @@ final class DictationSession {
             } else {
                 onChunkFinalized = nil
             }
-            try audioCapture.start(
-                chunking: speculativeConfiguration?.audioChunkingConfiguration,
-                onChunkFinalized: onChunkFinalized
-            )
+
+            let onAudioBuffer: (@Sendable (StreamingAudioBuffer) -> Void)?
+            if let nativeStreamingFeeder {
+                onAudioBuffer = { buffer in
+                    Task {
+                        await nativeStreamingFeeder.accept(buffer)
+                    }
+                }
+            } else {
+                onAudioBuffer = nil
+            }
+
+            do {
+                try audioCapture.start(
+                    chunking: speculativeConfiguration?.audioChunkingConfiguration,
+                    onChunkFinalized: onChunkFinalized,
+                    onAudioBuffer: onAudioBuffer
+                )
+            } catch {
+                await nativeStreamingFeeder?.cancel()
+                throw error
+            }
             trace.mark("audio_start_end")
             trace.mark("record_start")
 
@@ -232,7 +284,9 @@ final class DictationSession {
                 startedAt: recordingStartedAt,
                 target: target,
                 trace: trace,
-                speculativeCoordinator: speculativeCoordinator
+                speculativeCoordinator: speculativeCoordinator,
+                nativeStreamingSession: nativeStreamingSession,
+                nativeStreamingFeeder: nativeStreamingFeeder
             )
 
             state = .recording(context)
@@ -240,7 +294,7 @@ final class DictationSession {
                 .init(
                     phase: .listening,
                     title: "Listening",
-                    subtitle: speculativeCoordinator == nil ? "Release to insert" : "Streaming locally",
+                    subtitle: nativeStreamingSession != nil ? "Moonshine streaming" : (speculativeCoordinator == nil ? "Release to insert" : "Streaming locally"),
                     showsSpinner: false
                 )
             )
@@ -280,6 +334,41 @@ final class DictationSession {
         let activeRewriteEngine: RewriteEngine = mode == .mock ? mockRewriteEngine : rewriteEngine
 
         do {
+            if
+                mode == .real,
+                let recording,
+                let nativeStreamingSession = context.nativeStreamingSession,
+                let nativeStreamingFeeder = context.nativeStreamingFeeder
+            {
+                do {
+                    let (transcript, cleaned) = try await runNativeStreamingPipeline(
+                        context: context,
+                        recording: recording,
+                        session: nativeStreamingSession,
+                        feeder: nativeStreamingFeeder,
+                        rewriteEngine: activeRewriteEngine
+                    )
+                    try Task.checkCancellation()
+                    await insertAndLog(
+                        context: context,
+                        recording: recording,
+                        modeLogValue: "real-moonshine-streaming",
+                        sttEngineName: nativeStreamingSession.name,
+                        rewriteEngineName: activeRewriteEngine.name,
+                        transcript: transcript,
+                        cleaned: cleaned
+                    )
+                    return
+                } catch is CancellationError {
+                    await nativeStreamingFeeder.cancel()
+                    throw CancellationError()
+                } catch {
+                    await nativeStreamingFeeder.cancel()
+                    context.trace.mark("streaming_fallback")
+                    NSLog("LocalWispr native streaming STT failed; falling back to batch: \(error.localizedDescription)")
+                }
+            }
+
             if
                 mode == .real,
                 let recording,
@@ -323,7 +412,7 @@ final class DictationSession {
                 )
             )
 
-            let audioURL = try await recording?.whisperReadyWavURL()
+            let audioURL = try await recording?.sttReadyWavURL()
             let request = TranscriptionRequest(
                 startedAt: context.startedAt,
                 endedAt: recording?.endedAt ?? Date(),
@@ -382,6 +471,45 @@ final class DictationSession {
             )
             state = .idle
         }
+    }
+
+    private func runNativeStreamingPipeline(
+        context: SessionContext,
+        recording: AudioRecording,
+        session: StreamingSTTSession,
+        feeder: StreamingSTTAudioFeeder,
+        rewriteEngine: RewriteEngine
+    ) async throws -> (Transcript, CleanedText) {
+        panelController.show(
+            .init(
+                phase: .transcribing,
+                title: "Finalizing stream",
+                subtitle: session.name,
+                showsSpinner: true
+            )
+        )
+
+        context.trace.mark("stt_start")
+        try await feeder.finish()
+        let transcript = try await session.finish(endedAt: recording.endedAt)
+        try Task.checkCancellation()
+        context.trace.mark("stt_final")
+
+        panelController.show(
+            .init(
+                phase: .polishing,
+                title: "Polishing",
+                subtitle: rewriteEngine.name,
+                showsSpinner: true
+            )
+        )
+
+        context.trace.mark("rewrite_start")
+        let cleaned = try await rewriteEngine.rewrite(transcript)
+        try Task.checkCancellation()
+        context.trace.mark("rewrite_final")
+
+        return (transcript, cleaned)
     }
 
     private func runSpeculativePipeline(
@@ -452,6 +580,12 @@ final class DictationSession {
 
     private static var shouldSkipFinalSpeculativeCleanup: Bool {
         isEnabledEnvironmentFlag("LOCAL_WISPR_STREAMING_SKIP_FINAL_CLEANUP", default: true)
+    }
+
+    private static var shouldUseNativeStreamingSTT: Bool {
+        isEnabledEnvironmentFlag("LOCAL_WISPR_MOONSHINE_STREAMING", default: true)
+            && !isEnabledEnvironmentFlag("LOCAL_WISPR_DISABLE_STREAMING")
+            && !isEnabledEnvironmentFlag("LOCAL_WISPR_DISABLE_NATIVE_STREAMING_STT")
     }
 
     private static var shouldDeferStreamingFallbackAudio: Bool {

@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_SUPPORT="$HOME/Library/Application Support/LocalWispr"
-WHISPER_MODEL="${LOCAL_WISPR_WHISPER_MODEL:-$APP_SUPPORT/Models/whisper/ggml-base.en.bin}"
-WHISPER_SERVER_URL="${LOCAL_WISPR_WHISPER_SERVER_URL:-${LOCAL_WISPR_WHISPER_SERVER_ENDPOINT:-http://127.0.0.1:8178/inference}}"
+MOONSHINE_DIR="${LOCAL_WISPR_MOONSHINE_DIR:-$APP_SUPPORT/Moonshine}"
+MOONSHINE_VENV="${LOCAL_WISPR_MOONSHINE_VENV:-$MOONSHINE_DIR/venv}"
+MOONSHINE_BACKEND="${LOCAL_WISPR_MOONSHINE_BACKEND:-voice}"
+MOONSHINE_MODEL="${LOCAL_WISPR_MOONSHINE_MODEL:-UsefulSensors/moonshine-streaming-small}"
+MOONSHINE_LANGUAGE="${LOCAL_WISPR_MOONSHINE_LANGUAGE:-en}"
+MOONSHINE_VOICE_ARCH="${LOCAL_WISPR_MOONSHINE_VOICE_ARCH:-small-streaming}"
+MOONSHINE_SERVER_URL="${LOCAL_WISPR_MOONSHINE_SERVER_URL:-${LOCAL_WISPR_MOONSHINE_SERVER_ENDPOINT:-http://127.0.0.1:8179/transcribe}}"
 CLEANUP_MODEL="${LOCAL_WISPR_CLEANUP_MODEL:-$APP_SUPPORT/Models/cleanup/cleanup.gguf}"
 LLAMA_SERVER_URL="${LOCAL_WISPR_LLAMA_SERVER_URL:-${LOCAL_WISPR_LLAMA_SERVER_ENDPOINT:-http://127.0.0.1:8080/completion}}"
 
@@ -33,50 +39,35 @@ print(urlunparse((scheme, netloc, "/", "", "", "")))
 PY
 }
 
-find_executable() {
-    local name="$1"
-    if command -v "$name" >/dev/null 2>&1; then
-        command -v "$name"
-        return 0
-    fi
-
-    for candidate in \
-        "/opt/homebrew/opt/whisper-cpp/bin/$name" \
-        "/usr/local/opt/whisper-cpp/bin/$name" \
-        "/opt/homebrew/bin/$name" \
-        "/usr/local/bin/$name"; do
-        if [[ -x "$candidate" ]]; then
-            echo "$candidate"
-            return 0
-        fi
-    done
-
-    return 1
-}
-
 echo "Local Wispr engine smoke test"
 echo
 
-if find_executable whisper-cli >/dev/null && [[ -f "$WHISPER_MODEL" ]]; then
-    echo "whisper.cpp CLI: ready"
+if [[ -x "$MOONSHINE_VENV/bin/python" ]]; then
+    echo "Moonshine Python: ready ($MOONSHINE_VENV/bin/python)"
 else
-    echo "whisper.cpp CLI: missing executable or model"
+    echo "Moonshine Python: missing; run scripts/setup-local-engines.sh"
 fi
 
-if find_executable whisper-server >/dev/null && [[ -f "$WHISPER_MODEL" ]]; then
-    echo "whisper.cpp server binary: ready"
+if [[ -r "$MOONSHINE_DIR/moonshine_server.py" ]]; then
+    echo "Moonshine sidecar: ready ($MOONSHINE_DIR/moonshine_server.py)"
+elif [[ -r "$SCRIPT_DIR/moonshine_server.py" ]]; then
+    echo "Moonshine sidecar: ready ($SCRIPT_DIR/moonshine_server.py)"
 else
-    echo "whisper.cpp server binary: missing executable or model"
+    echo "Moonshine sidecar: missing"
 fi
 
-if is_loopback_url "$WHISPER_SERVER_URL"; then
-    if curl -fsS --max-time 2 "$(url_origin "$WHISPER_SERVER_URL")" >/dev/null 2>&1; then
-        echo "whisper.cpp server: reachable at $WHISPER_SERVER_URL"
+echo "Moonshine backend: $MOONSHINE_BACKEND"
+echo "Moonshine model: $MOONSHINE_MODEL"
+echo "Moonshine voice: $MOONSHINE_LANGUAGE/$MOONSHINE_VOICE_ARCH"
+
+if is_loopback_url "$MOONSHINE_SERVER_URL"; then
+    if curl -fsS --max-time 2 "$(url_origin "$MOONSHINE_SERVER_URL")" >/dev/null 2>&1; then
+        echo "Moonshine server: reachable at $MOONSHINE_SERVER_URL"
     else
-        echo "whisper.cpp server: not running at $WHISPER_SERVER_URL"
+        echo "Moonshine server: not running at $MOONSHINE_SERVER_URL"
     fi
 else
-    echo "whisper.cpp server: refused non-loopback URL $WHISPER_SERVER_URL"
+    echo "Moonshine server: refused non-loopback URL $MOONSHINE_SERVER_URL"
 fi
 
 if [[ -f "$CLEANUP_MODEL" ]]; then
@@ -109,4 +100,4 @@ echo
 if [[ -z "${server_response:-}" ]]; then
     echo "Tip: Local Wispr will use Basic Local Cleanup unless you start llama-server and set LOCAL_WISPR_REWRITE_ENGINE=llama-server."
 fi
-echo "Tip: when available, Local Wispr starts/uses loopback whisper-server by default with whisper-cli fallback."
+echo "Tip: Local Wispr starts/uses loopback Moonshine by default after scripts/setup-local-engines.sh."

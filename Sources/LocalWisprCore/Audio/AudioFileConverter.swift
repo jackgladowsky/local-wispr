@@ -1,7 +1,7 @@
 import Foundation
 
 enum AudioFileConverter {
-    static func convertToWhisperReadyWav(rawURL: URL, wavURL: URL) throws {
+    static func convertToSTTReadyWav(rawURL: URL, wavURL: URL) throws {
         let afconvert = URL(fileURLWithPath: "/usr/bin/afconvert")
 
         guard FileManager.default.isExecutableFile(atPath: afconvert.path) else {

@@ -35,8 +35,10 @@ mkdir -p "$HELPER_MACOS_DIR" "$HELPER_RESOURCES_DIR"
 
 cp "$ROOT_DIR/.build/release/LocalWispr" "$MACOS_DIR/LocalWispr"
 cp "$ROOT_DIR/Packaging/Info.plist" "$CONTENTS_DIR/Info.plist"
+cp "$ROOT_DIR/scripts/moonshine_server.py" "$RESOURCES_DIR/moonshine_server.py"
 stamp_plist_version "$CONTENTS_DIR/Info.plist"
 chmod +x "$MACOS_DIR/LocalWispr"
+chmod +x "$RESOURCES_DIR/moonshine_server.py"
 
 cp "$ROOT_DIR/.build/release/LocalWisprPasteHelper" "$HELPER_MACOS_DIR/LocalWisprPasteHelper"
 cp "$ROOT_DIR/Packaging/PasteHelperInfo.plist" "$HELPER_CONTENTS_DIR/Info.plist"

@@ -36,8 +36,8 @@ struct AudioRecording: Sendable, Equatable {
         max(0, endedAt.timeIntervalSince(startedAt))
     }
 
-    func whisperReadyWavURL(
-        converter: @escaping @Sendable (_ rawURL: URL, _ wavURL: URL) throws -> Void = AudioFileConverter.convertToWhisperReadyWav
+    func sttReadyWavURL(
+        converter: @escaping @Sendable (_ rawURL: URL, _ wavURL: URL) throws -> Void = AudioFileConverter.convertToSTTReadyWav
     ) async throws -> URL {
         switch fullSessionWavAvailability {
         case .ready:

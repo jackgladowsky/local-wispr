@@ -7,7 +7,7 @@ final class SettingsViewModel: ObservableObject {
     @Published private(set) var pasteHelperStatus: PasteHelperController.Status
     @Published private(set) var engineLines: [String]
 
-    let whisperModelPath: String
+    let moonshineRuntimePath: String
     let logPath: String
     let installWarning: String?
 
@@ -20,7 +20,7 @@ final class SettingsViewModel: ObservableObject {
         permissionSnapshot = PermissionSupport.snapshot
         pasteHelperStatus = PasteHelperController.isInstalled ? .checking : .notInstalled
         engineLines = EngineRegistry.statusLines()
-        whisperModelPath = LocalWisprPaths.defaultWhisperModelURL.path
+        moonshineRuntimePath = LocalWisprPaths.moonshineVirtualEnvironmentDirectory.path
         logPath = logger.logURL.path
         installWarning = PermissionSupport.stableInstallWarning
         PermissionMemory.rememberIfComplete(permissionSnapshot)

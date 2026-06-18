@@ -15,6 +15,7 @@ final class AudioCapture: @unchecked Sendable {
     private var startedAt: Date?
     private var chunkWriter: AudioChunkWriter?
     private var chunkHandler: (@Sendable (AudioChunk) -> Void)?
+    private var audioBufferHandler: (@Sendable (StreamingAudioBuffer) -> Void)?
 
     static func requestMicrophoneAccessIfNeeded() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
@@ -35,7 +36,8 @@ final class AudioCapture: @unchecked Sendable {
 
     func start(
         chunking: AudioChunkingConfiguration? = nil,
-        onChunkFinalized: (@Sendable (AudioChunk) -> Void)? = nil
+        onChunkFinalized: (@Sendable (AudioChunk) -> Void)? = nil,
+        onAudioBuffer: (@Sendable (StreamingAudioBuffer) -> Void)? = nil
     ) throws {
         guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
             throw LocalWisprError.microphonePermissionDenied
@@ -75,6 +77,7 @@ final class AudioCapture: @unchecked Sendable {
             self.startedAt = startedAt
             self.chunkWriter = chunkWriter
             self.chunkHandler = onChunkFinalized
+            self.audioBufferHandler = onAudioBuffer
         }
 
         inputNode.removeTap(onBus: 0)
@@ -96,6 +99,7 @@ final class AudioCapture: @unchecked Sendable {
                 self.startedAt = nil
                 self.chunkWriter = nil
                 self.chunkHandler = nil
+                self.audioBufferHandler = nil
                 return urls
             }
 
@@ -127,6 +131,7 @@ final class AudioCapture: @unchecked Sendable {
             startedAt = nil
             chunkWriter = nil
             chunkHandler = nil
+            audioBufferHandler = nil
             return state
         }
 
@@ -139,7 +144,7 @@ final class AudioCapture: @unchecked Sendable {
         switch fullSessionWavConversion {
         case .synchronous:
             do {
-                try AudioFileConverter.convertToWhisperReadyWav(rawURL: rawURL, wavURL: wavURL)
+                try AudioFileConverter.convertToSTTReadyWav(rawURL: rawURL, wavURL: wavURL)
             } catch {
                 let chunkURLs = state.pendingChunks.flatMap { [$0.rawURL, $0.wavURL] }
                 Self.removeFiles([rawURL, wavURL] + chunkURLs)
@@ -182,6 +187,7 @@ final class AudioCapture: @unchecked Sendable {
             startedAt = nil
             chunkWriter = nil
             chunkHandler = nil
+            audioBufferHandler = nil
             return urls
         }
 
@@ -189,7 +195,8 @@ final class AudioCapture: @unchecked Sendable {
     }
 
     private func write(_ buffer: AVAudioPCMBuffer, receivedAt: Date) {
-        let result = lock.withLock { () -> (pendingChunks: [PendingAudioChunk], handler: (@Sendable (AudioChunk) -> Void)?, cleanupURLs: [URL]) in
+        let streamingBuffer = Self.streamingAudioBuffer(from: buffer, receivedAt: receivedAt)
+        let result = lock.withLock { () -> (pendingChunks: [PendingAudioChunk], chunkHandler: (@Sendable (AudioChunk) -> Void)?, audioBufferHandler: (@Sendable (StreamingAudioBuffer) -> Void)?, cleanupURLs: [URL]) in
             do {
                 try audioFile?.write(from: buffer)
             } catch {
@@ -198,21 +205,27 @@ final class AudioCapture: @unchecked Sendable {
 
             do {
                 let pendingChunks = try chunkWriter?.write(buffer, receivedAt: receivedAt) ?? []
-                return (pendingChunks, chunkHandler, [])
+                return (pendingChunks, chunkHandler, audioBufferHandler, [])
             } catch {
                 NSLog("LocalWispr failed to write streaming audio chunk: \(error.localizedDescription)")
                 let cleanupURLs = chunkWriter?.temporaryURLs ?? []
                 chunkWriter = nil
                 chunkHandler = nil
-                return ([], nil, cleanupURLs)
+                audioBufferHandler = nil
+                return ([], nil, nil, cleanupURLs)
             }
         }
 
         Self.removeFiles(result.cleanupURLs)
-        guard let handler = result.handler else { return }
+
+        if let streamingBuffer, let audioBufferHandler = result.audioBufferHandler {
+            audioBufferHandler(streamingBuffer)
+        }
+
+        guard let chunkHandler = result.chunkHandler else { return }
 
         for pendingChunk in result.pendingChunks {
-            Self.deliverPendingChunk(pendingChunk, handler: handler)
+            Self.deliverPendingChunk(pendingChunk, handler: chunkHandler)
         }
     }
 
@@ -246,7 +259,7 @@ final class AudioCapture: @unchecked Sendable {
         }
 
         do {
-            try AudioFileConverter.convertToWhisperReadyWav(rawURL: pendingChunk.rawURL, wavURL: wavURL)
+            try AudioFileConverter.convertToSTTReadyWav(rawURL: pendingChunk.rawURL, wavURL: wavURL)
         } catch {
             removeFiles([pendingChunk.rawURL, wavURL])
             throw error
@@ -260,6 +273,71 @@ final class AudioCapture: @unchecked Sendable {
             endedAt: pendingChunk.endedAt,
             detectedSpeech: pendingChunk.detectedSpeech
         )
+    }
+
+    private static func streamingAudioBuffer(from buffer: AVAudioPCMBuffer, receivedAt: Date) -> StreamingAudioBuffer? {
+        guard let samples = monoFloatSamples(from: buffer), !samples.isEmpty else { return nil }
+        return StreamingAudioBuffer(
+            samples: samples,
+            sampleRate: buffer.format.sampleRate,
+            receivedAt: receivedAt
+        )
+    }
+
+    static func monoFloatSamples(from buffer: AVAudioPCMBuffer) -> [Float]? {
+        let frameCount = Int(buffer.frameLength)
+        guard frameCount > 0 else { return nil }
+
+        let channelCount = Int(buffer.format.channelCount)
+        guard channelCount > 0 else { return nil }
+
+        if let channelData = buffer.floatChannelData {
+            var output = Array(repeating: Float(0), count: frameCount)
+            if buffer.format.isInterleaved {
+                let samples = channelData[0]
+                for frame in 0..<frameCount {
+                    var sum = Float(0)
+                    let base = frame * channelCount
+                    for channel in 0..<channelCount {
+                        sum += samples[base + channel]
+                    }
+                    output[frame] = sum / Float(channelCount)
+                }
+            } else {
+                for channel in 0..<channelCount {
+                    let samples = channelData[channel]
+                    for frame in 0..<frameCount {
+                        output[frame] += samples[frame] / Float(channelCount)
+                    }
+                }
+            }
+            return output
+        }
+
+        if let channelData = buffer.int16ChannelData {
+            var output = Array(repeating: Float(0), count: frameCount)
+            if buffer.format.isInterleaved {
+                let samples = channelData[0]
+                for frame in 0..<frameCount {
+                    var sum = Float(0)
+                    let base = frame * channelCount
+                    for channel in 0..<channelCount {
+                        sum += Float(samples[base + channel]) / Float(Int16.max)
+                    }
+                    output[frame] = sum / Float(channelCount)
+                }
+            } else {
+                for channel in 0..<channelCount {
+                    let samples = channelData[channel]
+                    for frame in 0..<frameCount {
+                        output[frame] += (Float(samples[frame]) / Float(Int16.max)) / Float(channelCount)
+                    }
+                }
+            }
+            return output
+        }
+
+        return nil
     }
 
     private static func removeFiles(_ urls: [URL]) {

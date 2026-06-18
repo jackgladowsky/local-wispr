@@ -1,24 +1,13 @@
 import Foundation
 
 enum EngineRegistry {
-    static func makeSTTEngine(preferredWhisperServer: WhisperServerEngine? = nil) -> STTEngine {
-        let server = preferredWhisperServer ?? WhisperServerEngine.discover()
-        let cli = WhisperCLIEngine.discover()
-
-        if let server, let cli {
-            return FallbackSTTEngine(primary: server, fallback: cli)
-        }
-
-        if let server {
-            return server
-        }
-
-        if let cli {
-            return cli
+    static func makeSTTEngine(preferredMoonshineServer: MoonshineServerEngine? = nil) -> STTEngine {
+        if let moonshine = preferredMoonshineServer ?? MoonshineServerEngine.discover() {
+            return moonshine
         }
 
         return MissingSTTEngine(
-            detail: "Install whisper-cpp and download \(LocalWisprPaths.defaultWhisperModelURL.lastPathComponent)"
+            detail: "Run scripts/setup-local-engines.sh, then relaunch Local Wispr or start scripts/start-moonshine-server.sh"
         )
     }
 
@@ -34,16 +23,10 @@ enum EngineRegistry {
 
     static func statusLines() -> [String] {
         let stt: String
-        let whisperServer = WhisperServerEngine.discover()
-        let whisperCLI = WhisperCLIEngine.discover()
-        if let whisperServer, let whisperCLI {
-            stt = "STT: \(FallbackSTTEngine(primary: whisperServer, fallback: whisperCLI).name)"
-        } else if let whisperServer {
-            stt = "STT: \(whisperServer.name)"
-        } else if let whisperCLI {
-            stt = "STT: \(whisperCLI.name)"
+        if let moonshine = MoonshineServerEngine.discover() {
+            stt = "STT: \(moonshine.name)"
         } else {
-            stt = "STT: not configured"
+            stt = "STT: Moonshine not configured"
         }
 
         let cleanup: String
@@ -66,7 +49,7 @@ struct MissingSTTEngine: STTEngine {
     }
 }
 
-struct FallbackSTTEngine: STTEngine {
+struct FallbackSTTEngine: StreamingSTTEngine {
     let primary: STTEngine
     let fallback: STTEngine
 
@@ -81,6 +64,18 @@ struct FallbackSTTEngine: STTEngine {
             NSLog("LocalWispr STT primary failed; falling back: \(error.localizedDescription)")
             return try await fallback.transcribe(request)
         }
+    }
+
+    func startStreamingSession(startedAt: Date) async throws -> StreamingSTTSession {
+        if let primary = primary as? any StreamingSTTEngine {
+            return try await primary.startStreamingSession(startedAt: startedAt)
+        }
+
+        if let fallback = fallback as? any StreamingSTTEngine {
+            return try await fallback.startStreamingSession(startedAt: startedAt)
+        }
+
+        throw LocalWisprError.missingSTTEngine("No streaming STT engine is configured")
     }
 }
 

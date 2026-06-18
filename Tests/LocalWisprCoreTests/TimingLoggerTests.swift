@@ -22,7 +22,7 @@ func timingLoggerWritesSuccessfulPipelineFields() throws {
         ),
         mode: "real",
         recording: nil,
-        sttEngineName: "whisper.cpp ggml-base.en",
+        sttEngineName: "Moonshine server 127.0.0.1:8179",
         rewriteEngineName: "llama.cpp cleanup.gguf with Basic Local Cleanup fallback",
         transcript: transcript,
         cleaned: CleanedText(text: "Hello world.", engineName: "Basic Local Cleanup")
