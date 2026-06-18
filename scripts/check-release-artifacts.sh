@@ -25,7 +25,13 @@ while IFS= read -r path; do
     esac
 
     case "$lower_rel" in
-        *.wav|*.caf|*.aiff|*.m4a|*.mp3|*.flac|*.gguf|*.bin|*.p12|*.log|*.csv)
+        *"/local wispr.app/contents/resources/moonshinemodels/"*"/tokenizer.bin"|*"/local wispr.app/contents/resources/moonshinemodels/"*.ort)
+            continue
+            ;;
+    esac
+
+    case "$lower_rel" in
+        *.wav|*.caf|*.aiff|*.m4a|*.mp3|*.flac|*.gguf|*.bin|*.ort|*.p12|*.log|*.csv)
             echo "Forbidden release artifact extension: $rel" >&2
             failures=1
             continue

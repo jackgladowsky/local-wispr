@@ -53,6 +53,9 @@ jobs:
           xcodebuild -version
           swift --version
 
+      - name: Set up native Moonshine release model
+        run: scripts/setup-moonshine-native.sh
+
       - name: Resolve release metadata
         id: release-meta
         env:

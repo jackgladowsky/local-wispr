@@ -7,7 +7,7 @@ Local Wispr is a native macOS menu bar app for fast, fully local dictation. Hold
 - Local microphone capture, transcription, cleanup, and timing logs.
 - Native menu bar UX with a small status panel and SwiftUI settings.
 - Hold-to-dictate hotkey: `Control` + `Option` + `Space`.
-- Streaming Moonshine speech-to-text via a local loopback sidecar.
+- Native Moonshine speech-to-text with streaming, offline `.ort` models, and no localhost STT in the normal path.
 - Basic local cleanup by default, with optional loopback `llama.cpp` server cleanup.
 - Clipboard-preserving paste with focus and secure-field checks.
 - Separate paste helper app so Accessibility permission survives main-app rebuilds.
@@ -16,7 +16,7 @@ Local Wispr is a native macOS menu bar app for fast, fully local dictation. Hold
 
 - macOS 14 or newer
 - Xcode Command Line Tools / Swift 6
-- Python 3 for the local Moonshine sidecar
+- Python 3 only if you opt into the development Moonshine sidecar fallback
 - Homebrew for optional `llama.cpp` cleanup setup
 - Microphone permission for dictation
 - Accessibility permission for automatic paste; without it, output is copied for manual `Command-V`
@@ -52,32 +52,27 @@ scripts/smoke-local-engines.sh
 Default paths:
 
 ```text
-Moonshine venv:  ~/Library/Application Support/LocalWispr/Moonshine/venv
-Moonshine script: ~/Library/Application Support/LocalWispr/Moonshine/moonshine_server.py
-Cleanup model:   ~/Library/Application Support/LocalWispr/Models/cleanup/cleanup.gguf
+Moonshine native model: ~/Library/Application Support/LocalWispr/Moonshine/models/en/small-streaming
+Moonshine sidecar venv: ~/Library/Application Support/LocalWispr/Moonshine/venv (optional)
+Cleanup model:          ~/Library/Application Support/LocalWispr/Models/cleanup/cleanup.gguf
 ```
 
-Local Wispr now uses Moonshine for STT. When the Moonshine runtime is installed, the app starts a managed loopback sidecar on `127.0.0.1:8179` and uses the sidecar's streaming-session API by default: it opens a stream on key-down, feeds mic buffers while recording, then finalizes the stream on key-up.
+Local Wispr now uses Moonshine's native ONNX/C++ runtime through Swift. The app opens a native stream on key-down, feeds mic buffers while recording, then finalizes the stream on key-up. No Python process or localhost HTTP STT server is used when the native model is available.
 
-You can also run the sidecar manually:
-
-```sh
-scripts/start-moonshine-server.sh
-```
-
-The default backend is Moonshine Voice, the optimized ONNX/C++ runtime, using `en/small-streaming`. Useful overrides:
+The default native model is Moonshine Voice `en/small-streaming`. Useful overrides:
 
 ```sh
-LOCAL_WISPR_MOONSHINE_VOICE_ARCH=tiny-streaming scripts/start-moonshine-server.sh
-LOCAL_WISPR_MOONSHINE_VOICE_ARCH=medium-streaming scripts/start-moonshine-server.sh
+LOCAL_WISPR_MOONSHINE_VOICE_ARCH=tiny-streaming scripts/setup-moonshine-native.sh
+LOCAL_WISPR_MOONSHINE_VOICE_ARCH=medium-streaming scripts/setup-moonshine-native.sh
+LOCAL_WISPR_MOONSHINE_NATIVE_MODEL_DIR=/path/to/model scripts/install-app.sh
 LOCAL_WISPR_MOONSHINE_STREAM_UPLOAD_SECONDS=0.05 scripts/install-app.sh
-LOCAL_WISPR_MOONSHINE_SERVER_URL=http://127.0.0.1:8179/transcribe scripts/install-app.sh
 ```
 
-A slower Hugging Face Transformers backend is still available for checkpoint experiments:
+The Python loopback sidecar is kept as an optional development fallback. To install and run it manually:
 
 ```sh
-LOCAL_WISPR_MOONSHINE_BACKEND=transformers LOCAL_WISPR_MOONSHINE_MODEL=UsefulSensors/moonshine-streaming-tiny scripts/start-moonshine-server.sh
+LOCAL_WISPR_SETUP_MOONSHINE_SERVER=1 scripts/setup-local-engines.sh
+scripts/start-moonshine-server.sh
 ```
 
 Optional LLM cleanup can use a local `llama.cpp` server:
@@ -96,7 +91,7 @@ The app defaults to the low-latency path on main:
 - native Moonshine streaming STT is enabled by default;
 - full-session WAV conversion is deferred unless batch fallback needs it;
 - final streaming cleanup is skipped for faster release-to-output;
-- a managed loopback Moonshine sidecar is started and used automatically when available;
+- the Python loopback Moonshine sidecar is lazy fallback only, not a normal startup process;
 - paste-helper launch attempts and response polling are optimized.
 
 Useful opt-outs for troubleshooting:
@@ -104,6 +99,7 @@ Useful opt-outs for troubleshooting:
 ```sh
 LOCAL_WISPR_DISABLE_STREAMING=1 scripts/install-app.sh
 LOCAL_WISPR_MOONSHINE_STREAMING=0 scripts/install-app.sh
+LOCAL_WISPR_DISABLE_MOONSHINE_NATIVE=1 scripts/install-app.sh
 LOCAL_WISPR_STREAMING_SKIP_FINAL_CLEANUP=0 scripts/install-app.sh
 LOCAL_WISPR_DISABLE_MANAGED_MOONSHINE_SERVER=1 scripts/install-app.sh
 ```

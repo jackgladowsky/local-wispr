@@ -1,13 +1,42 @@
 import Foundation
 
 enum EngineRegistry {
-    static func makeSTTEngine(preferredMoonshineServer: MoonshineServerEngine? = nil) -> STTEngine {
-        if let moonshine = preferredMoonshineServer ?? MoonshineServerEngine.discover() {
-            return moonshine
+    static func makeSTTEngine(
+        preferredMoonshineServer: MoonshineServerEngine? = nil,
+        managedMoonshineServerController: MoonshineServerController? = nil
+    ) -> STTEngine {
+        let discoveredMoonshineServer = managedMoonshineServerController == nil
+            ? MoonshineServerEngine.discover()
+            : nil
+        return makeSTTEngine(
+            preferredMoonshineNative: MoonshineNativeEngine.discover(),
+            preferredMoonshineServer: preferredMoonshineServer ?? discoveredMoonshineServer,
+            managedMoonshineServerController: managedMoonshineServerController
+        )
+    }
+
+    static func makeSTTEngine(
+        preferredMoonshineNative: MoonshineNativeEngine?,
+        preferredMoonshineServer: MoonshineServerEngine?,
+        managedMoonshineServerController: MoonshineServerController? = nil
+    ) -> STTEngine {
+        let serverFallback: STTEngine? = preferredMoonshineServer
+            ?? managedMoonshineServerController.map { ManagedMoonshineServerFallbackEngine(controller: $0) }
+
+        if let native = preferredMoonshineNative {
+            native.preload()
+            if let serverFallback {
+                return FallbackSTTEngine(primary: native, fallback: serverFallback)
+            }
+            return native
+        }
+
+        if let serverFallback {
+            return serverFallback
         }
 
         return MissingSTTEngine(
-            detail: "Run scripts/setup-local-engines.sh, then relaunch Local Wispr or start scripts/start-moonshine-server.sh"
+            detail: "Run scripts/setup-local-engines.sh, then relaunch Local Wispr"
         )
     }
 
@@ -23,7 +52,9 @@ enum EngineRegistry {
 
     static func statusLines() -> [String] {
         let stt: String
-        if let moonshine = MoonshineServerEngine.discover() {
+        if let nativeMoonshine = MoonshineNativeEngine.discover() {
+            stt = "STT: \(nativeMoonshine.name)"
+        } else if let moonshine = MoonshineServerEngine.discover() {
             stt = "STT: \(moonshine.name)"
         } else {
             stt = "STT: Moonshine not configured"
@@ -68,7 +99,15 @@ struct FallbackSTTEngine: StreamingSTTEngine {
 
     func startStreamingSession(startedAt: Date) async throws -> StreamingSTTSession {
         if let primary = primary as? any StreamingSTTEngine {
-            return try await primary.startStreamingSession(startedAt: startedAt)
+            do {
+                return try await primary.startStreamingSession(startedAt: startedAt)
+            } catch {
+                if let fallback = fallback as? any StreamingSTTEngine {
+                    NSLog("LocalWispr streaming STT primary failed to start; falling back: \(error.localizedDescription)")
+                    return try await fallback.startStreamingSession(startedAt: startedAt)
+                }
+                throw error
+            }
         }
 
         if let fallback = fallback as? any StreamingSTTEngine {
@@ -79,7 +118,62 @@ struct FallbackSTTEngine: StreamingSTTEngine {
     }
 }
 
+final class ManagedMoonshineServerFallbackEngine: StreamingSTTEngine, @unchecked Sendable {
+    private let controller: MoonshineServerController
+    private let lock = NSLock()
+
+    init(controller: MoonshineServerController) {
+        self.controller = controller
+    }
+
+    var name: String {
+        "Managed \(controller.engine.name)"
+    }
+
+    func transcribe(_ request: TranscriptionRequest) async throws -> Transcript {
+        try await engine().transcribe(request)
+    }
+
+    func startStreamingSession(startedAt: Date) async throws -> StreamingSTTSession {
+        try await engine().startStreamingSession(startedAt: startedAt)
+    }
+
+    private func engine() async throws -> MoonshineServerEngine {
+        let started = lock.withLock {
+            controller.startIfNeeded()
+        }
+        guard started else {
+            throw LocalWisprError.missingSTTEngine("Moonshine server fallback could not be started")
+        }
+
+        let engine = controller.engine
+        let root = MoonshineServerEngine.serverRoot(for: engine.endpoint)
+        let timeout = ProcessInfo.processInfo.environment["LOCAL_WISPR_MOONSHINE_SERVER_READY_TIMEOUT_SECONDS"]
+            .flatMap(TimeInterval.init)
+            .map { max(0.1, $0) }
+            ?? 10
+        let deadline = Date().addingTimeInterval(timeout)
+
+        while Date() < deadline {
+            if MoonshineServerEngine.defaultReachabilityCheck(root) {
+                return engine
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+
+        throw LocalWisprError.missingSTTEngine("Moonshine server fallback did not become ready at \(root.absoluteString)")
+    }
+}
+
 private struct CleanupBudgetExceeded: Error {}
+
+private extension NSLock {
+    func withLock<T>(_ body: () throws -> T) rethrows -> T {
+        lock()
+        defer { unlock() }
+        return try body()
+    }
+}
 
 struct FallbackRewriteEngine: RewriteEngine {
     let primary: RewriteEngine

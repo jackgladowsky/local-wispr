@@ -26,7 +26,14 @@ jobs:
       - name: Run tests
         run: swift test
 
+      - name: Set up native Moonshine smoke model
+        env:
+          LOCAL_WISPR_MOONSHINE_VOICE_ARCH: tiny-streaming
+        run: scripts/setup-moonshine-native.sh
+
       - name: Build app bundles
+        env:
+          LOCAL_WISPR_MOONSHINE_VOICE_ARCH: tiny-streaming
         run: scripts/build-app.sh
 
       - name: Package release assets smoke test

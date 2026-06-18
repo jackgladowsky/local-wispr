@@ -9,6 +9,9 @@ MOONSHINE_BACKEND="${LOCAL_WISPR_MOONSHINE_BACKEND:-voice}"
 MOONSHINE_MODEL="${LOCAL_WISPR_MOONSHINE_MODEL:-UsefulSensors/moonshine-streaming-small}"
 MOONSHINE_LANGUAGE="${LOCAL_WISPR_MOONSHINE_LANGUAGE:-en}"
 MOONSHINE_VOICE_ARCH="${LOCAL_WISPR_MOONSHINE_VOICE_ARCH:-small-streaming}"
+MOONSHINE_NATIVE_ARCH="${LOCAL_WISPR_MOONSHINE_NATIVE_ARCH:-$MOONSHINE_VOICE_ARCH}"
+MOONSHINE_NATIVE_MODEL_CONFIGURED="${LOCAL_WISPR_MOONSHINE_NATIVE_MODEL_DIR:-${LOCAL_WISPR_MOONSHINE_MODEL_DIR:-}}"
+MOONSHINE_NATIVE_MODEL_DIR="${MOONSHINE_NATIVE_MODEL_CONFIGURED:-$MOONSHINE_DIR/models/$MOONSHINE_LANGUAGE/$MOONSHINE_NATIVE_ARCH}"
 MOONSHINE_SERVER_URL="${LOCAL_WISPR_MOONSHINE_SERVER_URL:-${LOCAL_WISPR_MOONSHINE_SERVER_ENDPOINT:-http://127.0.0.1:8179/transcribe}}"
 CLEANUP_MODEL="${LOCAL_WISPR_CLEANUP_MODEL:-$APP_SUPPORT/Models/cleanup/cleanup.gguf}"
 LLAMA_SERVER_URL="${LOCAL_WISPR_LLAMA_SERVER_URL:-${LOCAL_WISPR_LLAMA_SERVER_ENDPOINT:-http://127.0.0.1:8080/completion}}"
@@ -64,8 +67,46 @@ find_executable() {
     return 1
 }
 
+moonshine_default_model_source() {
+    local cache_root="${MOONSHINE_VOICE_CACHE:-$HOME/Library/Caches/moonshine_voice}"
+    case "$MOONSHINE_NATIVE_ARCH" in
+        tiny|base)
+            printf '%s/download.moonshine.ai/model/%s-%s/quantized/%s-%s\n' "$cache_root" "$MOONSHINE_NATIVE_ARCH" "$MOONSHINE_LANGUAGE" "$MOONSHINE_NATIVE_ARCH" "$MOONSHINE_LANGUAGE"
+            ;;
+        *)
+            printf '%s/download.moonshine.ai/model/%s-%s/quantized\n' "$cache_root" "$MOONSHINE_NATIVE_ARCH" "$MOONSHINE_LANGUAGE"
+            ;;
+    esac
+}
+
+moonshine_native_model_ready() {
+    local directory="$1"
+    local files
+    case "$MOONSHINE_NATIVE_ARCH" in
+        tiny|base) files=(encoder_model.ort decoder_model_merged.ort tokenizer.bin) ;;
+        *) files=(adapter.ort cross_kv.ort decoder_kv.ort encoder.ort frontend.ort streaming_config.json tokenizer.bin) ;;
+    esac
+
+    [[ -d "$directory" ]] || return 1
+    local file
+    for file in "${files[@]}"; do
+        [[ -r "$directory/$file" ]] || return 1
+    done
+}
+
 echo "Local Wispr engine check"
 echo
+
+MOONSHINE_NATIVE_CACHE_DIR="$(moonshine_default_model_source)"
+if moonshine_native_model_ready "$MOONSHINE_NATIVE_MODEL_DIR"; then
+    status_line "Moonshine native:" "$MOONSHINE_LANGUAGE/$MOONSHINE_NATIVE_ARCH at $MOONSHINE_NATIVE_MODEL_DIR"
+elif [[ -n "$MOONSHINE_NATIVE_MODEL_CONFIGURED" ]]; then
+    status_line "Moonshine native:" "configured path is not ready: $MOONSHINE_NATIVE_MODEL_DIR"
+elif moonshine_native_model_ready "$MOONSHINE_NATIVE_CACHE_DIR"; then
+    status_line "Moonshine native:" "$MOONSHINE_LANGUAGE/$MOONSHINE_NATIVE_ARCH at $MOONSHINE_NATIVE_CACHE_DIR"
+else
+    status_line "Moonshine native:" "missing; run scripts/setup-moonshine-native.sh"
+fi
 
 if [[ -x "$MOONSHINE_VENV/bin/python" ]]; then
     status_line "Moonshine Python:" "$MOONSHINE_VENV/bin/python"
@@ -123,5 +164,5 @@ else
 fi
 
 echo
-echo "Local Wispr uses the loopback Moonshine sidecar for STT."
+echo "Local Wispr uses native Moonshine STT by default and keeps the loopback sidecar as an optional fallback."
 echo "The app can run with Basic Local Cleanup when llama.cpp cleanup is unavailable."

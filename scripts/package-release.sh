@@ -29,6 +29,7 @@ fi
 if [[ "${LOCAL_WISPR_SKIP_BUILD:-0}" != "1" ]]; then
     LOCAL_WISPR_VERSION="$PLIST_VERSION" \
     LOCAL_WISPR_BUILD_NUMBER="$BUILD_NUMBER" \
+    LOCAL_WISPR_REQUIRE_BUNDLED_MOONSHINE_MODEL="${LOCAL_WISPR_REQUIRE_BUNDLED_MOONSHINE_MODEL:-1}" \
         "$ROOT_DIR/scripts/build-app.sh" >/dev/null
 fi
 
@@ -37,6 +38,17 @@ for app in "$APP_DIR" "$HELPER_APP_DIR"; do
         echo "Missing built app bundle: $app" >&2
         echo "Run scripts/build-app.sh first or omit LOCAL_WISPR_SKIP_BUILD=1." >&2
         exit 1
+    fi
+
+    if [[ "$app" == "$APP_DIR" && "${LOCAL_WISPR_REQUIRE_BUNDLED_MOONSHINE_MODEL:-1}" == "1" ]]; then
+        model_dir="$app/Contents/Resources/MoonshineModels"
+        if [[ ! -d "$model_dir" ]] \
+            || ! find "$model_dir" -type f -name 'tokenizer.bin' -print -quit | grep -q . \
+            || ! find "$model_dir" -type f -name '*.ort' -print -quit | grep -q .; then
+            echo "Missing bundled Moonshine native model in: $model_dir" >&2
+            echo "Run scripts/setup-moonshine-native.sh before packaging, or set LOCAL_WISPR_REQUIRE_BUNDLED_MOONSHINE_MODEL=0 for a dev-only package." >&2
+            exit 1
+        fi
     fi
 
     codesign --verify --deep --strict "$app"

@@ -74,7 +74,7 @@ else
 fi
 
 echo
-echo "Moonshine setup complete. Local Wispr will start the loopback sidecar automatically when launched."
+echo "Moonshine sidecar setup complete. Local Wispr uses native Moonshine by default and starts this loopback sidecar only as a fallback when configured."
 echo
 echo "You can also run the sidecar manually with:"
 echo "  scripts/start-moonshine-server.sh"

@@ -16,11 +16,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         let panelController = DictationPanelController()
         let insertionController = InsertionController()
-        let managedMoonshineServer = startManagedMoonshineServer()
         let session = DictationSession(
             panelController: panelController,
             audioCapture: audioCapture,
-            sttEngine: EngineRegistry.makeSTTEngine(preferredMoonshineServer: managedMoonshineServer),
+            sttEngine: EngineRegistry.makeSTTEngine(managedMoonshineServerController: moonshineServerController),
             rewriteEngine: EngineRegistry.makeRewriteEngine(),
             insertionController: insertionController,
             logger: logger
@@ -227,7 +226,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let session = DictationSession(
             panelController: panelController,
             audioCapture: audioCapture,
-            sttEngine: EngineRegistry.makeSTTEngine(preferredMoonshineServer: startManagedMoonshineServer()),
+            sttEngine: EngineRegistry.makeSTTEngine(managedMoonshineServerController: moonshineServerController),
             rewriteEngine: EngineRegistry.makeRewriteEngine(),
             insertionController: insertionController,
             logger: logger
