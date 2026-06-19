@@ -43,6 +43,14 @@ enum EngineRegistry {
     static func makeRewriteEngine() -> RewriteEngine {
         let fallback = RuleBasedRewriteEngine()
 
+        if let openAICompatible = OpenAICompatibleRewriteEngine.discover() {
+            return FallbackRewriteEngine(
+                primary: openAICompatible,
+                fallback: fallback,
+                usesFastLocalShortCircuit: shouldShortCircuitSmartCleanup()
+            )
+        }
+
         if let llamaServer = LlamaServerRewriteEngine.discover() {
             return FallbackRewriteEngine(primary: llamaServer, fallback: fallback)
         }
@@ -61,13 +69,19 @@ enum EngineRegistry {
         }
 
         let cleanup: String
-        if let llamaServer = LlamaServerRewriteEngine.discover() {
+        if let openAICompatible = OpenAICompatibleRewriteEngine.discover() {
+            cleanup = "Cleanup: \(openAICompatible.name)"
+        } else if let llamaServer = LlamaServerRewriteEngine.discover() {
             cleanup = "Cleanup: \(llamaServer.name)"
         } else {
             cleanup = "Cleanup: Basic local rules"
         }
 
         return [stt, cleanup]
+    }
+
+    private static func shouldShortCircuitSmartCleanup() -> Bool {
+        ProcessInfo.processInfo.environment["LOCAL_WISPR_SMART_CLEANUP_SHORT_CIRCUIT"] == "1"
     }
 }
 
@@ -178,13 +192,14 @@ private extension NSLock {
 struct FallbackRewriteEngine: RewriteEngine {
     let primary: RewriteEngine
     let fallback: RewriteEngine
+    var usesFastLocalShortCircuit = true
 
     var name: String {
         "\(primary.name) with \(fallback.name) fallback"
     }
 
     func rewrite(_ transcript: Transcript) async throws -> CleanedText {
-        if CleanupPrompt.shouldUseFastLocalCleanup(for: transcript.text) {
+        if usesFastLocalShortCircuit, CleanupPrompt.shouldUseFastLocalCleanup(for: transcript.text) {
             return try await fallback.rewrite(transcript)
         }
 

@@ -27,8 +27,15 @@ LOCAL_WISPR_DISABLE_STREAMING=1 scripts/install-app.sh
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `LOCAL_WISPR_REWRITE_ENGINE` | basic local cleanup | Set to `llama-server` to use an optional loopback cleanup server. |
-| `LOCAL_WISPR_LLAMA_SERVER_URL` | loopback default | Completion endpoint for optional `llama.cpp` cleanup. |
+| `LOCAL_WISPR_REWRITE_ENGINE` | basic local cleanup | Set to `llama-server` for legacy llama.cpp `/completion`, or `smart-hosted` / `openai-compatible` for OpenAI-compatible cleanup. |
+| `LOCAL_WISPR_LLAMA_SERVER_URL` | loopback default | Completion endpoint for legacy optional `llama.cpp` cleanup. |
+| `LOCAL_WISPR_SMART_CLEANUP_URL` | `http://127.0.0.1:8080/v1/chat/completions` when smart cleanup is selected | OpenAI-compatible chat completions endpoint for Smart Cleanup V1. |
+| `LOCAL_WISPR_SMART_CLEANUP_MODEL` | `local-cleanup` | Model name sent to the OpenAI-compatible endpoint. |
+| `LOCAL_WISPR_SMART_CLEANUP_API_KEY` | unset | Bearer token for remote or authenticated OpenAI-compatible endpoints. |
+| `LOCAL_WISPR_SMART_CLEANUP_TIMEOUT_SECONDS` | `1.2` | HTTP request timeout for Smart Cleanup V1. |
+| `LOCAL_WISPR_SMART_CLEANUP_CONTEXT` | unset | Small explicit context string included in cleanup prompts. |
+| `LOCAL_WISPR_SMART_CLEANUP_SHORT_CIRCUIT` | disabled | If `1`, use fast local cleanup for short plain transcripts even when smart cleanup is configured. |
+| `LOCAL_WISPR_ALLOW_REMOTE_SMART_CLEANUP` | disabled | Allows non-loopback smart cleanup endpoint discovery when an API key is present. Explicit `LOCAL_WISPR_REWRITE_ENGINE=smart-hosted` also opts in. |
 | `LOCAL_WISPR_STREAMING_SKIP_FINAL_CLEANUP` | enabled | Skip final cleanup on streaming path for lower release-to-output latency. |
 
 ## Insertion and paste behavior
@@ -64,9 +71,29 @@ LOCAL_WISPR_MOONSHINE_VOICE_ARCH=tiny-streaming scripts/setup-moonshine-native.s
 LOCAL_WISPR_MOONSHINE_NATIVE_MODEL_DIR="$HOME/Library/Application Support/LocalWispr/Moonshine/models/en/tiny-streaming" scripts/install-app.sh
 ```
 
-Enable optional local LLM cleanup:
+Enable optional local LLM cleanup with legacy llama.cpp `/completion`:
 
 ```sh
 scripts/start-llama-server.sh
 LOCAL_WISPR_REWRITE_ENGINE=llama-server scripts/install-app.sh
+```
+
+Enable Smart Cleanup V1 against a local OpenAI-compatible llama.cpp server:
+
+```sh
+scripts/start-llama-server.sh
+LOCAL_WISPR_REWRITE_ENGINE=smart-hosted \
+LOCAL_WISPR_SMART_CLEANUP_URL=http://127.0.0.1:8080/v1/chat/completions \
+LOCAL_WISPR_SMART_CLEANUP_MODEL=local-cleanup \
+  scripts/install-app.sh
+```
+
+Enable Smart Cleanup V1 against a remote OpenAI-compatible API:
+
+```sh
+LOCAL_WISPR_REWRITE_ENGINE=smart-hosted \
+LOCAL_WISPR_SMART_CLEANUP_URL=https://api.example.com/v1/chat/completions \
+LOCAL_WISPR_SMART_CLEANUP_MODEL=fast-cleanup-model \
+LOCAL_WISPR_SMART_CLEANUP_API_KEY=... \
+  scripts/install-app.sh
 ```

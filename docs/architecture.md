@@ -11,7 +11,7 @@ Local Wispr is built around one product promise: press a hotkey, speak, release,
 1. **Hotkey** — `HotkeyController` listens for `Control` + `Option` + `Space` and starts/stops a `DictationSession`.
 2. **Capture** — `AudioCapture` records microphone buffers with `AVAudioEngine`, writes temporary local audio, and publishes live buffers for streaming STT and waveform UI.
 3. **STT** — `MoonshineNativeEngine` opens a native Moonshine stream on key-down and finalizes it on key-up. `MoonshineServerEngine` remains a loopback-only fallback.
-4. **Cleanup** — `RuleBasedRewriteEngine` / basic local cleanup is the default fast path. Optional `llama.cpp` cleanup can run through a loopback-only server.
+4. **Cleanup** — `RuleBasedRewriteEngine` / basic local cleanup is the default fast path. Optional cleanup can run through legacy loopback `llama.cpp` or Smart Cleanup V1 OpenAI-compatible endpoints with timeout-budgeted fallback.
 5. **Insertion** — `InsertionController` and `LocalWisprPasteHelper` paste into the active target when Accessibility is trusted, or copy to the clipboard as a safe fallback.
 6. **Logging** — `TimingLogger` appends structured pipeline timing fields for every success or failure.
 
@@ -22,7 +22,7 @@ Local Wispr is built around one product promise: press a hotkey, speak, release,
 | App lifecycle | `AppDelegate.swift`, `LocalWisprApplication.swift` | menu bar app, settings, hotkey/session wiring |
 | Audio | `AudioCapture.swift`, `AudioRecording.swift`, `AudioFileConverter.swift` | mic capture, temporary files, WAV conversion, live waveform levels |
 | Dictation | `DictationSession.swift`, `StreamingSTTAudioFeeder.swift` | state machine, streaming/fallback orchestration |
-| Engines | `MoonshineNativeEngine.swift`, `EngineRegistry.swift`, rewrite engines | STT and cleanup discovery/runtime selection |
+| Engines | `MoonshineNativeEngine.swift`, `EngineRegistry.swift`, rewrite engines | STT and cleanup discovery/runtime selection, including optional OpenAI-compatible smart cleanup |
 | Insertion | `InsertionController.swift`, `PasteHelperController.swift`, `PasteboardSnapshot.swift` | target capture, paste, clipboard restore |
 | UI | `Panel/`, `Settings/` | matte listening overlay and SwiftUI settings |
 | Packaging | `Packaging/`, `scripts/build-app.sh`, `scripts/package-release.sh` | app bundles, helper bundle, release artifacts |
@@ -34,7 +34,7 @@ Local Wispr's default boundaries are intentionally strict:
 - microphone audio is captured locally through AVFoundation;
 - temporary audio files are removed after processing;
 - native Moonshine runs in-process through Swift/ONNX/C++;
-- optional HTTP services must be loopback-only unless explicitly changed;
+- optional HTTP services are loopback-only unless explicitly changed; remote Smart Cleanup requires explicit opt-in and an API key;
 - there are no accounts, cloud transcription requests, analytics, or remote history in the default path.
 
 ## Fallbacks
