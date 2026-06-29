@@ -39,6 +39,33 @@ func ruleBasedCleanupCapitalizesStandaloneIAndWeekdays() {
 }
 
 @Test
+func ruleBasedCleanupConvertsSpokenPunctuationCommands() {
+    let question = RuleBasedRewriteEngine.cleanup("hello comma world question mark")
+    let period = RuleBasedRewriteEngine.cleanup("hello period")
+
+    #expect(question == "Hello, world?")
+    #expect(period == "Hello.")
+}
+
+@Test
+func ruleBasedCleanupConvertsDictationLineBreakCommands() {
+    let output = RuleBasedRewriteEngine.cleanup("first line new line second line")
+
+    #expect(output == "First line\nSecond line.")
+}
+
+@Test
+func ruleBasedCleanupDoesNotConvertUnboundedPunctuationWords() {
+    let comma = RuleBasedRewriteEngine.cleanup("the comma key is useful")
+    let questionMark = RuleBasedRewriteEngine.cleanup("the question mark key is useful")
+    let dash = RuleBasedRewriteEngine.cleanup("the dash character matters")
+
+    #expect(comma == "The comma key is useful.")
+    #expect(questionMark == "The question mark key is useful.")
+    #expect(dash == "The dash character matters.")
+}
+
+@Test
 func ruleBasedRewriteThrowsOnEmptyOutput() async {
     let engine = RuleBasedRewriteEngine()
     var caughtEmptyTranscript = false

@@ -34,3 +34,18 @@ func transcriptCleanerNormalizesWhitespace() {
 
     #expect(cleaned == "hello moonshine text")
 }
+
+@Test
+func transcriptCleanerStripsArtifactsANSIEscapesAndDuplicateLines() {
+    let stdout = """
+    \u{001B}[31m[BLANK_AUDIO]\u{001B}[0m actual words [silence]
+    actual words
+    [Music]
+    ...
+    More words
+    """
+
+    let cleaned = TranscriptTextCleaner.cleanedTranscript(from: stdout)
+
+    #expect(cleaned == "actual words More words")
+}

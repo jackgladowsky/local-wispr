@@ -58,6 +58,50 @@ func adaptiveChunkBoundaryDoesNotRotateOnSilenceBeforeMinimumDuration() {
 }
 
 @Test
+func adaptiveChunkBoundaryRequiresMinimumSpeechBeforeSilenceRotation() {
+    var scheduler = AudioChunkBoundaryScheduler(
+        configuration: AudioChunkingConfiguration(
+            chunkDuration: 2.0,
+            minimumChunkDuration: 0.1,
+            adaptiveChunking: AdaptiveAudioChunkingConfiguration(
+                trailingSilenceDuration: 0.1,
+                speechRMS: 0.05,
+                minimumSpeechDuration: 0.2
+            )
+        ),
+        sampleRate: 100
+    )
+
+    #expect(!scheduler.record(frameCount: 10, rms: 0.10).shouldRotate)
+    #expect(!scheduler.record(frameCount: 10, rms: 0.00).shouldRotate)
+    #expect(!scheduler.record(frameCount: 10, rms: 0.00).shouldRotate)
+    #expect(scheduler.detectedSpeech == false)
+}
+
+@Test
+func adaptiveChunkBoundaryDebouncesSingleSilentBuffer() {
+    var scheduler = AudioChunkBoundaryScheduler(
+        configuration: AudioChunkingConfiguration(
+            chunkDuration: 2.0,
+            minimumChunkDuration: 0.1,
+            adaptiveChunking: AdaptiveAudioChunkingConfiguration(
+                trailingSilenceDuration: 0.1,
+                speechRMS: 0.05,
+                minimumTrailingSilentBuffers: 2
+            )
+        ),
+        sampleRate: 100
+    )
+
+    #expect(!scheduler.record(frameCount: 20, rms: 0.10).shouldRotate)
+    #expect(!scheduler.record(frameCount: 10, rms: 0.00).shouldRotate)
+
+    let decision = scheduler.record(frameCount: 1, rms: 0.00)
+    #expect(decision.shouldRotate)
+    #expect(decision.reason == .trailingSilence)
+}
+
+@Test
 func adaptiveChunkBoundaryUsesMaxDurationForContinuousSpeech() {
     var scheduler = AudioChunkBoundaryScheduler(
         configuration: AudioChunkingConfiguration(

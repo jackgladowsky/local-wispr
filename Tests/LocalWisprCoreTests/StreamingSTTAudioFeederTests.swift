@@ -76,6 +76,51 @@ func streamingAudioFeederAppendsTrailingSilenceOnFinish() async throws {
 }
 
 @Test
+func streamingAudioFeederSplitsOversizedBuffersIntoTargetSizedAppends() async throws {
+    let session = RecordingStreamingSession()
+    let feeder = StreamingSTTAudioFeeder(
+        session: session,
+        targetBufferDuration: 0.1,
+        trailingSilenceDuration: 0
+    )
+
+    await feeder.accept(
+        StreamingAudioBuffer(
+            samples: Array(repeating: 0.1, count: 5_600),
+            sampleRate: 16_000,
+            receivedAt: Date()
+        )
+    )
+    try await feeder.finish()
+
+    let appended = session.appendedBuffers
+    #expect(appended.map { $0.samples.count } == [1_600, 1_600, 1_600, 800])
+}
+
+@Test
+func streamingAudioFeederDoesNotAppendExtraSilenceAfterSilentTail() async throws {
+    let session = RecordingStreamingSession()
+    let feeder = StreamingSTTAudioFeeder(
+        session: session,
+        targetBufferDuration: 0.1,
+        trailingSilenceDuration: 0.05
+    )
+
+    await feeder.accept(
+        StreamingAudioBuffer(
+            samples: Array(repeating: 0.0, count: 800),
+            sampleRate: 16_000,
+            receivedAt: Date()
+        )
+    )
+    try await feeder.finish()
+
+    let appended = session.appendedBuffers
+    #expect(appended.count == 1)
+    #expect(appended[0].samples.count == 800)
+}
+
+@Test
 func fallbackSTTEngineStartsStreamingSessionFromPrimary() async throws {
     let primary = RecordingStreamingEngine()
     let fallback = NonStreamingSTTEngine()

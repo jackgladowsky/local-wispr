@@ -46,7 +46,7 @@ struct SpeculativeChunkAccumulator: Equatable, Sendable {
         return Self.joinDeduplicatingOverlap(texts)
     }
 
-    static func joinDeduplicatingOverlap(_ texts: [String], maxOverlapWords: Int = 8) -> String {
+    static func joinDeduplicatingOverlap(_ texts: [String], maxOverlapWords: Int = 12) -> String {
         texts.reduce("") { partialResult, next in
             merge(partialResult, next, maxOverlapWords: maxOverlapWords)
         }
@@ -85,6 +85,12 @@ struct SpeculativeChunkAccumulator: Equatable, Sendable {
     private static func normalizedToken(_ token: String) -> String {
         token
             .lowercased()
+            .replacingOccurrences(of: "’", with: "'")
+            .replacingOccurrences(of: "‘", with: "'")
+            .replacingOccurrences(of: "“", with: "\"")
+            .replacingOccurrences(of: "”", with: "\"")
+            .replacingOccurrences(of: "—", with: "-")
+            .replacingOccurrences(of: "–", with: "-")
             .trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
     }
 }
