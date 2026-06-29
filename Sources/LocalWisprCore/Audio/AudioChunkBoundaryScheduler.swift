@@ -4,15 +4,21 @@ struct AdaptiveAudioChunkingConfiguration: Sendable, Equatable {
     let trailingSilenceDuration: TimeInterval
     let speechRMS: Float
     let dropsSilentChunks: Bool
+    let minimumSpeechDuration: TimeInterval
+    let minimumTrailingSilentBuffers: Int
 
     init(
         trailingSilenceDuration: TimeInterval = 0.35,
         speechRMS: Float = 0.012,
-        dropsSilentChunks: Bool = false
+        dropsSilentChunks: Bool = false,
+        minimumSpeechDuration: TimeInterval = 0.06,
+        minimumTrailingSilentBuffers: Int = 2
     ) {
         self.trailingSilenceDuration = max(0, trailingSilenceDuration)
         self.speechRMS = max(0, speechRMS)
         self.dropsSilentChunks = dropsSilentChunks
+        self.minimumSpeechDuration = max(0, minimumSpeechDuration)
+        self.minimumTrailingSilentBuffers = max(1, minimumTrailingSilentBuffers)
     }
 }
 
@@ -33,9 +39,12 @@ struct AudioChunkBoundaryScheduler: Sendable, Equatable {
     private let chunkFrameLimit: Int64
     private let minimumFrameCount: Int64
     private let trailingSilenceFrameLimit: Int64
+    private let minimumSpeechFrameCount: Int64
 
     private var currentFrameCount: Int64 = 0
     private var trailingSilenceFrameCount: Int64 = 0
+    private var currentSpeechFrameCount: Int64 = 0
+    private var trailingSilentBufferCount = 0
     private var containsDetectedSpeech = false
     private var observedEnergy = false
     private var lastBufferWasSilent = false
@@ -54,6 +63,11 @@ struct AudioChunkBoundaryScheduler: Sendable, Equatable {
             sampleRate: safeSampleRate,
             minimum: 0
         )
+        self.minimumSpeechFrameCount = Self.frameCount(
+            for: configuration.adaptiveChunking?.minimumSpeechDuration ?? 0,
+            sampleRate: safeSampleRate,
+            minimum: 1
+        )
     }
 
     var detectedSpeech: Bool? {
@@ -68,18 +82,26 @@ struct AudioChunkBoundaryScheduler: Sendable, Equatable {
         if let adaptiveChunking, let rms {
             observedEnergy = true
             if rms >= adaptiveChunking.speechRMS {
-                containsDetectedSpeech = true
+                currentSpeechFrameCount += safeFrameCount
+                if currentSpeechFrameCount >= minimumSpeechFrameCount {
+                    containsDetectedSpeech = true
+                }
                 trailingSilenceFrameCount = 0
+                trailingSilentBufferCount = 0
                 lastBufferWasSilent = false
             } else {
+                currentSpeechFrameCount = 0
                 trailingSilenceFrameCount += safeFrameCount
+                trailingSilentBufferCount += 1
                 lastBufferWasSilent = true
             }
         } else {
+            currentSpeechFrameCount = 0
+            trailingSilentBufferCount = 0
             lastBufferWasSilent = false
         }
 
-        guard adaptiveChunking != nil else {
+        guard let adaptiveChunking else {
             if currentFrameCount >= chunkFrameLimit {
                 return AudioChunkBoundaryDecision(
                     shouldRotate: true,
@@ -105,6 +127,7 @@ struct AudioChunkBoundaryScheduler: Sendable, Equatable {
         if
             containsDetectedSpeech,
             lastBufferWasSilent,
+            trailingSilentBufferCount >= adaptiveChunking.minimumTrailingSilentBuffers,
             currentFrameCount >= minimumFrameCount,
             trailingSilenceFrameCount >= trailingSilenceFrameLimit
         {
@@ -125,6 +148,8 @@ struct AudioChunkBoundaryScheduler: Sendable, Equatable {
     mutating func reset() {
         currentFrameCount = 0
         trailingSilenceFrameCount = 0
+        currentSpeechFrameCount = 0
+        trailingSilentBufferCount = 0
         containsDetectedSpeech = false
         observedEnergy = false
         lastBufferWasSilent = false

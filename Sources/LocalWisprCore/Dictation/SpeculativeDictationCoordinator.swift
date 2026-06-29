@@ -44,7 +44,9 @@ struct SpeculativeDictationConfiguration: Sendable, Equatable {
         ) ? AdaptiveAudioChunkingConfiguration(
             trailingSilenceDuration: environment["LOCAL_WISPR_STREAMING_SILENCE_SECONDS"].flatMap(TimeInterval.init) ?? 0.35,
             speechRMS: environment["LOCAL_WISPR_STREAMING_SPEECH_RMS"].flatMap(Float.init) ?? 0.012,
-            dropsSilentChunks: environmentFlag("LOCAL_WISPR_STREAMING_DROP_SILENT_CHUNKS", in: environment)
+            dropsSilentChunks: environmentFlag("LOCAL_WISPR_STREAMING_DROP_SILENT_CHUNKS", in: environment),
+            minimumSpeechDuration: environment["LOCAL_WISPR_STREAMING_MIN_SPEECH_SECONDS"].flatMap(TimeInterval.init) ?? 0.06,
+            minimumTrailingSilentBuffers: environment["LOCAL_WISPR_STREAMING_MIN_SILENT_BUFFERS"].flatMap(Int.init) ?? 2
         ) : nil
 
         return SpeculativeDictationConfiguration(
@@ -243,13 +245,20 @@ actor SpeculativeDictationCoordinator {
 
         try Task.checkCancellation()
 
-        let cleaned = try await rewriteEngine.rewrite(transcript)
+        let cleanedText: String?
+        do {
+            cleanedText = try await rewriteEngine.rewrite(transcript).text
+        } catch LocalWisprError.emptyTranscript {
+            let locallyCleaned = RuleBasedRewriteEngine.cleanup(transcript.text)
+            guard !locallyCleaned.isEmpty else { return nil }
+            cleanedText = locallyCleaned
+        }
         try Task.checkCancellation()
 
         return SpeculativeTranscriptChunk(
             index: chunk.index,
             rawText: transcript.text,
-            cleanedText: cleaned.text,
+            cleanedText: cleanedText,
             startTime: max(0, chunk.startedAt.timeIntervalSince(sessionStartedAt)),
             endTime: max(0, chunk.endedAt.timeIntervalSince(sessionStartedAt))
         )

@@ -40,6 +40,16 @@ func speculativeAccumulatorDeduplicatesWordOverlap() {
 }
 
 @Test
+func speculativeAccumulatorDeduplicatesPunctuationInsensitiveOverlap() {
+    let joined = SpeculativeChunkAccumulator.joinDeduplicatingOverlap([
+        "we'll review the launch plan,",
+        "launch plan and John's notes"
+    ])
+
+    #expect(joined == "we'll review the launch plan, and John's notes")
+}
+
+@Test
 func speculativeAccumulatorFallsBackToRawTextWhenChunkCleanupIsEmpty() {
     var accumulator = SpeculativeChunkAccumulator()
     accumulator.record(

@@ -97,6 +97,32 @@ func speculativeCoordinatorSkipsNonTranscribableChunksAndRemovesTemporaryFiles()
     #expect(!FileManager.default.fileExists(atPath: chunk.wavURL.path))
 }
 
+@Test
+func speculativeCoordinatorIgnoresRewriteEmptyTranscriptChunks() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let fillerChunk = try makeChunk(in: directory, index: 0, text: "um")
+    let wordsChunk = try makeChunk(in: directory, index: 1, text: "hello")
+    let coordinator = SpeculativeDictationCoordinator(
+        sttEngine: StubSTTEngine(),
+        rewriteEngine: EmptyForFillerRewriteEngine(),
+        startedAt: fillerChunk.startedAt,
+        configuration: SpeculativeDictationConfiguration(
+            chunkDuration: 1,
+            minimumChunkDuration: 0.01,
+            chunkArrivalGrace: 0.01
+        )
+    )
+
+    await coordinator.accept(fillerChunk)
+    await coordinator.accept(wordsChunk)
+    let draft = try await coordinator.finish(finalChunks: [], expectedChunkCount: 2)
+
+    #expect(draft.transcript.text == "hello")
+    #expect(draft.speculativeCleanedText == "HELLO")
+}
+
 private struct StubSTTEngine: STTEngine {
     let name = "Stub STT"
 
@@ -115,6 +141,17 @@ private struct StubRewriteEngine: RewriteEngine {
 
     func rewrite(_ transcript: Transcript) async throws -> CleanedText {
         CleanedText(text: transcript.text.uppercased(), engineName: name)
+    }
+}
+
+private struct EmptyForFillerRewriteEngine: RewriteEngine {
+    let name = "Empty For Filler"
+
+    func rewrite(_ transcript: Transcript) async throws -> CleanedText {
+        if transcript.text == "um" {
+            throw LocalWisprError.emptyTranscript
+        }
+        return CleanedText(text: transcript.text.uppercased(), engineName: name)
     }
 }
 

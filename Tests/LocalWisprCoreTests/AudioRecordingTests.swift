@@ -138,6 +138,20 @@ func audioRecordingRemovesTemporaryFiles() throws {
     try? FileManager.default.removeItem(at: directory)
 }
 
+@Test
+func audioLevelThrottleLimitsHighFrequencyUpdates() {
+    var throttle = AudioLevelThrottle(maxUpdatesPerSecond: 20)
+    let start = Date()
+
+    let first = throttle.shouldEmit(at: start)
+    let second = throttle.shouldEmit(at: start.addingTimeInterval(0.02))
+    let third = throttle.shouldEmit(at: start.addingTimeInterval(0.051))
+
+    #expect(first)
+    #expect(!second)
+    #expect(third)
+}
+
 private func temporaryDirectory() throws -> URL {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("LocalWisprCoreTests", isDirectory: true)

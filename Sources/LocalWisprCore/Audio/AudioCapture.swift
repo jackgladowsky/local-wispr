@@ -17,6 +17,7 @@ final class AudioCapture: @unchecked Sendable {
     private var chunkHandler: (@Sendable (AudioChunk) -> Void)?
     private var audioBufferHandler: (@Sendable (StreamingAudioBuffer) -> Void)?
     private var audioLevelHandler: (@Sendable ([Float]) -> Void)?
+    private var audioLevelThrottle: AudioLevelThrottle?
 
     static func requestMicrophoneAccessIfNeeded() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
@@ -81,6 +82,7 @@ final class AudioCapture: @unchecked Sendable {
             self.chunkHandler = onChunkFinalized
             self.audioBufferHandler = onAudioBuffer
             self.audioLevelHandler = onAudioLevel
+            self.audioLevelThrottle = onAudioLevel == nil ? nil : AudioLevelThrottle(maxUpdatesPerSecond: 20)
         }
 
         inputNode.removeTap(onBus: 0)
@@ -104,6 +106,7 @@ final class AudioCapture: @unchecked Sendable {
                 self.chunkHandler = nil
                 self.audioBufferHandler = nil
                 self.audioLevelHandler = nil
+                self.audioLevelThrottle = nil
                 return urls
             }
 
@@ -137,6 +140,7 @@ final class AudioCapture: @unchecked Sendable {
             chunkHandler = nil
             audioBufferHandler = nil
             audioLevelHandler = nil
+            audioLevelThrottle = nil
             return state
         }
 
@@ -194,6 +198,7 @@ final class AudioCapture: @unchecked Sendable {
             chunkHandler = nil
             audioBufferHandler = nil
             audioLevelHandler = nil
+            audioLevelThrottle = nil
             return urls
         }
 
@@ -202,7 +207,7 @@ final class AudioCapture: @unchecked Sendable {
 
     private func write(_ buffer: AVAudioPCMBuffer, receivedAt: Date) {
         let streamingBuffer = Self.streamingAudioBuffer(from: buffer, receivedAt: receivedAt)
-        let result = lock.withLock { () -> (pendingChunks: [PendingAudioChunk], chunkHandler: (@Sendable (AudioChunk) -> Void)?, audioBufferHandler: (@Sendable (StreamingAudioBuffer) -> Void)?, audioLevelHandler: (@Sendable ([Float]) -> Void)?, cleanupURLs: [URL]) in
+        let result = lock.withLock { () -> (pendingChunks: [PendingAudioChunk], chunkHandler: (@Sendable (AudioChunk) -> Void)?, audioBufferHandler: (@Sendable (StreamingAudioBuffer) -> Void)?, audioLevelHandler: (@Sendable ([Float]) -> Void)?, shouldEmitAudioLevel: Bool, cleanupURLs: [URL]) in
             do {
                 try audioFile?.write(from: buffer)
             } catch {
@@ -211,7 +216,8 @@ final class AudioCapture: @unchecked Sendable {
 
             do {
                 let pendingChunks = try chunkWriter?.write(buffer, receivedAt: receivedAt) ?? []
-                return (pendingChunks, chunkHandler, audioBufferHandler, audioLevelHandler, [])
+                let shouldEmitAudioLevel = audioLevelThrottle?.shouldEmit(at: receivedAt) ?? (audioLevelHandler != nil)
+                return (pendingChunks, chunkHandler, audioBufferHandler, audioLevelHandler, shouldEmitAudioLevel, [])
             } catch {
                 NSLog("LocalWispr failed to write streaming audio chunk: \(error.localizedDescription)")
                 let cleanupURLs = chunkWriter?.temporaryURLs ?? []
@@ -219,7 +225,8 @@ final class AudioCapture: @unchecked Sendable {
                 chunkHandler = nil
                 audioBufferHandler = nil
                 audioLevelHandler = nil
-                return ([], nil, nil, nil, cleanupURLs)
+                audioLevelThrottle = nil
+                return ([], nil, nil, nil, false, cleanupURLs)
             }
         }
 
@@ -229,7 +236,7 @@ final class AudioCapture: @unchecked Sendable {
             audioBufferHandler(streamingBuffer)
         }
 
-        if let streamingBuffer, let audioLevelHandler = result.audioLevelHandler {
+        if result.shouldEmitAudioLevel, let streamingBuffer, let audioLevelHandler = result.audioLevelHandler {
             audioLevelHandler(Self.waveformLevels(from: streamingBuffer.samples, barCount: 9))
         }
 
@@ -578,6 +585,31 @@ private final class AudioChunkWriter {
 
     private func maxDate(_ lhs: Date, _ rhs: Date) -> Date {
         lhs >= rhs ? lhs : rhs
+    }
+}
+
+struct AudioLevelThrottle: Sendable, Equatable {
+    private let minimumInterval: TimeInterval
+    private var lastEmission: Date?
+
+    init(maxUpdatesPerSecond: Double) {
+        self.minimumInterval = maxUpdatesPerSecond > 0 ? 1.0 / maxUpdatesPerSecond : 0
+    }
+
+    mutating func shouldEmit(at date: Date) -> Bool {
+        guard minimumInterval > 0 else {
+            lastEmission = date
+            return true
+        }
+
+        guard let lastEmission else {
+            self.lastEmission = date
+            return true
+        }
+
+        guard date.timeIntervalSince(lastEmission) >= minimumInterval else { return false }
+        self.lastEmission = date
+        return true
     }
 }
 
