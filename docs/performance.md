@@ -12,6 +12,7 @@ It is not trying to be a general transcription suite. The goal is a small macOS 
 | Mic buffers feed STT directly | Avoids waiting for a full recording file before transcription starts. |
 | Full-session WAV conversion is deferred | Batch fallback can still work, but the fast path avoids unnecessary conversion. |
 | Final LLM cleanup is skipped by default on streaming | Basic local cleanup avoids adding model latency after release. |
+| Smart Cleanup V1 is timeout-budgeted | Optional OpenAI-compatible cleanup can improve text quality without blocking indefinitely. |
 | Paste helper is kept stable across rebuilds | Reduces permission churn and keeps insertion fast during development. |
 | Clipboard restore is asynchronous | Paste latency is not blocked by clipboard restoration. |
 | Timing logs are always written | Regressions can be measured instead of guessed. |
@@ -61,6 +62,35 @@ A fair dictation benchmark should separate:
 6. **paste behavior** — automatic insertion vs copy-to-clipboard.
 
 Avoid comparing only raw transcription speed. For a hold-to-talk app, users mostly feel the delay after they stop talking.
+
+## Smart Cleanup V1
+
+Smart Cleanup V1 keeps local Moonshine STT and sends only the transcript plus optional small context to an OpenAI-compatible chat completions endpoint. It can point at:
+
+- local `llama.cpp` server OpenAI-compatible mode;
+- a local gateway such as LM Studio/Ollama if it exposes `/v1/chat/completions`;
+- a remote OpenAI-compatible API when explicitly configured with an API key.
+
+The implementation is intentionally latency-safe:
+
+- it is opt-in via `LOCAL_WISPR_REWRITE_ENGINE=smart-hosted` or `openai-compatible`;
+- non-loopback endpoints require explicit opt-in and an API key;
+- the existing `FallbackRewriteEngine` keeps a hard latency budget through `LOCAL_WISPR_LLM_CLEANUP_BUDGET_MS`;
+- failed/slow cleanup falls back to Basic Local Cleanup;
+- `LOCAL_WISPR_SMART_CLEANUP_SHORT_CIRCUIT=1` can keep short plain snippets on the fast local cleanup path.
+
+Local OpenAI-compatible llama.cpp example:
+
+```sh
+scripts/start-llama-server.sh
+LOCAL_WISPR_REWRITE_ENGINE=smart-hosted \
+LOCAL_WISPR_SMART_CLEANUP_URL=http://127.0.0.1:8080/v1/chat/completions \
+LOCAL_WISPR_SMART_CLEANUP_MODEL=local-cleanup \
+LOCAL_WISPR_LLM_CLEANUP_BUDGET_MS=650 \
+  scripts/install-app.sh
+```
+
+For hosted APIs, start with a small/fast model and a tight timeout. The quality win comes from better cleanup, but every remote call competes directly with release-to-output latency.
 
 ## Market context
 

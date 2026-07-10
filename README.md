@@ -36,7 +36,7 @@ Most polished dictation tools are either cloud services, paid subscriptions, fil
 - Hold-to-dictate hotkey: `Control` + `Option` + `Space`.
 - Native Moonshine speech-to-text through `moonshine-swift` with streaming `.ort` models.
 - Low-latency path: open stream on key-down, feed mic buffers live, finalize on release.
-- Basic local cleanup by default; optional loopback `llama.cpp` cleanup server.
+- Basic local cleanup by default; optional loopback `llama.cpp` cleanup server or Smart Cleanup V1 through OpenAI-compatible endpoints.
 - Clipboard-preserving paste with focus and secure-field checks.
 - Separate paste helper app so Accessibility permission can survive main-app rebuilds.
 - Timing logs for every dictation session, including release-to-output latency.
@@ -114,11 +114,21 @@ LOCAL_WISPR_MOONSHINE_NATIVE_MODEL_DIR=/path/to/model scripts/install-app.sh
 LOCAL_WISPR_MOONSHINE_STREAM_UPLOAD_SECONDS=0.05 scripts/install-app.sh
 ```
 
-Optional LLM cleanup can use a local `llama.cpp` server:
+Optional LLM cleanup can use a local `llama.cpp` server through the legacy `/completion` endpoint:
 
 ```sh
 scripts/start-llama-server.sh
 LOCAL_WISPR_REWRITE_ENGINE=llama-server scripts/install-app.sh
+```
+
+Smart Cleanup V1 can also target local or hosted OpenAI-compatible chat completion APIs:
+
+```sh
+scripts/start-llama-server.sh
+LOCAL_WISPR_REWRITE_ENGINE=smart-hosted \
+LOCAL_WISPR_SMART_CLEANUP_URL=http://127.0.0.1:8080/v1/chat/completions \
+LOCAL_WISPR_SMART_CLEANUP_MODEL=local-cleanup \
+  scripts/install-app.sh
 ```
 
 If no cleanup server is configured, Local Wispr uses Basic Local Cleanup.

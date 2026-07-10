@@ -48,10 +48,14 @@ fi
 
 echo "Starting llama.cpp server"
 echo "Model: $MODEL"
-echo "URL:   http://$HOST:$PORT/completion"
+echo "Legacy URL:           http://$HOST:$PORT/completion"
+echo "OpenAI-compatible URL: http://$HOST:$PORT/v1/chat/completions"
 echo
-echo "Launch Local Wispr with:"
+echo "Launch Local Wispr with legacy llama.cpp cleanup:"
 echo "LOCAL_WISPR_REWRITE_ENGINE=llama-server LOCAL_WISPR_LLAMA_SERVER_URL=http://$HOST:$PORT/completion scripts/install-app.sh"
+echo
+echo "Launch Local Wispr with Smart Cleanup V1 via OpenAI-compatible llama.cpp:"
+echo "LOCAL_WISPR_REWRITE_ENGINE=smart-hosted LOCAL_WISPR_SMART_CLEANUP_URL=http://$HOST:$PORT/v1/chat/completions LOCAL_WISPR_SMART_CLEANUP_MODEL=local-cleanup scripts/install-app.sh"
 echo
 
 args=(

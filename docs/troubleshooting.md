@@ -69,6 +69,24 @@ scripts/start-llama-server.sh
 LOCAL_WISPR_REWRITE_ENGINE=llama-server scripts/install-app.sh
 ```
 
+For Smart Cleanup V1 through a local OpenAI-compatible endpoint:
+
+```sh
+scripts/start-llama-server.sh
+LOCAL_WISPR_REWRITE_ENGINE=smart-hosted \
+LOCAL_WISPR_SMART_CLEANUP_URL=http://127.0.0.1:8080/v1/chat/completions \
+LOCAL_WISPR_SMART_CLEANUP_MODEL=local-cleanup \
+  scripts/install-app.sh
+```
+
+If smart cleanup is too slow, lower the budget or short-circuit short snippets:
+
+```sh
+LOCAL_WISPR_LLM_CLEANUP_BUDGET_MS=400 \
+LOCAL_WISPR_SMART_CLEANUP_SHORT_CIRCUIT=1 \
+  scripts/install-app.sh
+```
+
 For the fastest streaming path, keep final streaming cleanup skipped:
 
 ```sh
